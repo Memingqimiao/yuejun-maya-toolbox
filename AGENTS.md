@@ -1,6 +1,6 @@
 # Project instructions
 
-Stable version: 3.7.2, based on the user-selected 3.7.1. Scene presets OPEN a scene; do not reintroduce the abandoned 3.8.0 merge/import experiment without a new user request.
+Stable version: 3.7.5, based on the user-selected 3.7.1. Scene presets OPEN a scene; do not reintroduce the abandoned 3.8.0 merge/import experiment without a new user request.
 
 Target Maya 2022, Python 3.7, maya.cmds and OpenMaya 2.0. Keep UI separate from scene logic. Preserve preview save protection and module reloading. Handle failures gracefully and use undoable scene operations where supported.
 

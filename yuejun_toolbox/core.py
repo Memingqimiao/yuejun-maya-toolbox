@@ -251,6 +251,7 @@ def open_scene_preset(relative, discard_changes=False):
     require_renderer(path)
     if scene_modified() and not discard_changes:
         raise ToolError("当前场景尚未保存，请先保存后再打开预设。")
+    project.ensure_project()
     session = project.SyncSession(path)
     session.bundle()
     local_path = session.copy_file(path, "scene")

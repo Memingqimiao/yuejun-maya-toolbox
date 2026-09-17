@@ -25,7 +25,7 @@ class ToolboxWindow(object):
 
     def build(self):
         config.migrate_preferences()
-        window = cmds.window(WINDOW, title="Yuejun Toolbox 3.7.2",
+        window = cmds.window(WINDOW, title="Yuejun Toolbox 3.7.5",
                              widthHeight=(540, 770), sizeable=True)
         root = cmds.formLayout(parent=window)
         header = cmds.columnLayout(parent=root, adjustableColumn=True, rowSpacing=GAP)
@@ -33,7 +33,7 @@ class ToolboxWindow(object):
         mode = cmds.columnLayout(parent=header, adjustableColumn=True, rowSpacing=4)
         cmds.checkBox(parent=mode, label="使用 V-Ray（默认 Arnold）", height=24,
                       value=False, changeCommand=self.switch_renderer)
-        cmds.text(parent=mode, label="未设置项目可预览；设置项目后才能保存", align="left", height=20)
+        cmds.text(parent=mode, label="打开预设 / 切换 VFace：未设置项目时自动使用默认工程", align="left", height=20)
         settings = cmds.frameLayout(parent=header, label="资源与工具设置", collapsable=True,
                                     collapse=True, marginWidth=GAP, marginHeight=GAP)
         settings_column = cmds.columnLayout(parent=settings, adjustableColumn=True, rowSpacing=GAP)
@@ -183,6 +183,9 @@ class ToolboxWindow(object):
     def run(self, key, *_):
         if self.busy:
             return
+        if key == "vface_browser":
+            from . import vface_ui
+            return self.guarded(vface_ui.show)
         if key == "expression_notes":
             from . import notes
             return self.guarded(notes.show)
@@ -290,8 +293,9 @@ def close():
     if cmds.window(WINDOW, exists=True):
         cmds.deleteUI(WINDOW, window=True)
     _instance = None
-    from . import notes
+    from . import notes, vface_ui
     notes.close()
+    vface_ui.close()
     if cmds.window("yuejunProjectReport", exists=True):
         cmds.deleteUI("yuejunProjectReport")
 

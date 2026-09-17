@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Resource configuration and declarative tool catalogue; no UI creation."""
 import os
+import json
+import tempfile
 from collections import namedtuple
 
 from maya import cmds
@@ -8,6 +10,14 @@ from maya import cmds
 ROOT_OPTION = "yuejunToolbox_resourceRoot"
 DEFAULT_ROOT = "C:/Yuejun_ToolBox"
 OLD_DEFAULT_ROOT = "C:/Yunuo_Issue_01"
+# Legacy keys remain accepted so existing scenes and shelf scripts still resolve.
+PATH_MAPPINGS = (
+    ("Maya_shader_node/Arnold", "RenderPresets/Arnold"),
+    ("Maya_shader_node/Test_Vray.mb", "RenderPresets/VRay/Test_Vray.mb"),
+    ("Maya_shader_node", "NodePresets"),
+    ("Maya_Model", "Models"), ("Maya_Script", "Scripts"),
+    ("Maya_Texture", "Textures"), ("Maya_Light", "Lights"),
+)
 ROOT_MIGRATED_OPTION = "yuejunToolbox_rootMigrated31"
 Tool = namedtuple("Tool", "key label kind path help")
 PROJECT_GROUP = ("项目管理", (
@@ -29,6 +39,9 @@ GROUPS = (
     ("场景预设", (
         Tool("preset_vray", "打开 V-Ray 预设", "open", "Maya_shader_node/Test_Vray.mb", "直接打开 V-Ray 预设文件，替换当前场景；有未保存修改时先提示。"),
         Tool("preset_arnold", "打开 Arnold 预设", "open", "Maya_shader_node/Arnold/Base_Arnold.ma", "打开素材库中的 Arnold 预设；保留材质、灯光及渲染设置，有未保存修改时先提示。"),
+    )),
+    ("VFace 素材", (
+        Tool("vface_browser", "选择 VFace 头部与贴图…", "ui", "", "打开 VFace 素材目录，切换配套 Arnold 预设的头部及贴图。"),
     )),
     ("材质节点", (
         Tool("disp", "Disp", "import", "Maya_shader_node/Disp.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
@@ -55,7 +68,7 @@ TOOLS = {tool.key: tool for _, group in GROUPS for tool in group}
 TOOLS.update({tool.key: tool for tool in PROJECT_GROUP[1]})
 GROUP_COLUMNS = {"材质节点": 3, "眼球": 2, "项目管理": 3}
 VRAY_TOOLS = {"vray_skin", "preset_vray", "import_eye", "disp", "micro", "disp_black"}
-ARNOLD_TOOLS = {"preset_arnold", "import_eye_arnold"}
+ARNOLD_TOOLS = {"preset_arnold", "import_eye_arnold", "vface_browser"}
 
 
 def visible_groups(vray=False):
@@ -86,7 +99,8 @@ def set_resource_root(path):
     if not os.path.isdir(path):
         raise ValueError("资源文件夹不存在：{}".format(path))
     if not any(os.path.isdir(os.path.join(path, name)) for name in
-               ("Maya_Script", "Maya_Model", "Maya_shader_node", "Maya_Texture", "Maya_Light")):
+               ("Maya_Script", "Maya_Model", "Maya_shader_node", "Maya_Texture", "Maya_Light",
+                "RenderPresets", "NodePresets", "Models", "Scripts")):
         raise ValueError("请选择包含 Maya_Script、Maya_Model 等子目录的资源根目录。")
     cmds.optionVar(stringValue=(ROOT_OPTION, path))
     return path
@@ -94,6 +108,9 @@ def set_resource_root(path):
 
 def asset_path(relative):
     root = os.path.realpath(resource_root())
+    migrated = modern_path(relative)
+    if os.path.exists(os.path.join(root, migrated)) or not os.path.exists(os.path.join(root, relative)):
+        relative = migrated
     path = os.path.realpath(os.path.join(root, relative))
     if os.path.commonpath((root, path)) != root:
         raise ValueError("资源路径不能超出资源根目录。")
@@ -112,4 +129,55 @@ def asset_path(relative):
             path = os.path.realpath(path)
             if os.path.commonpath((root, path)) != root:
                 raise ValueError("资源路径不能超出资源根目录。")
+    return path
+
+
+def modern_path(relative):
+    relative = relative.replace("\\", "/")
+    for old, new in PATH_MAPPINGS:
+        if relative == old or relative.startswith(old + "/"):
+            return new + relative[len(old):]
+    return relative
+
+
+def settings():
+    path = os.path.join(resource_root(), "Settings", "toolbox.json")
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding="utf-8") as stream:
+        data = json.load(stream)
+    if not isinstance(data, dict):
+        raise ValueError("Settings/toolbox.json 必须是 JSON 对象。")
+    return data
+
+
+def set_setting(key, value):
+    data = settings()
+    data[key] = value
+    folder = os.path.join(resource_root(), "Settings")
+    os.makedirs(folder, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=folder, delete=False) as stream:
+        json.dump(data, stream, ensure_ascii=False, indent=2)
+        temp = stream.name
+    try:
+        os.replace(temp, os.path.join(folder, "toolbox.json"))
+    finally:
+        if os.path.isfile(temp):
+            os.remove(temp)
+
+
+def vface_root():
+    saved = settings().get("vface_root", "")
+    if saved:
+        return saved
+    key = "yuejunToolbox_vfaceRoot"
+    return cmds.optionVar(query=key) if cmds.optionVar(exists=key) else ""
+
+
+def set_vface_root(path):
+    path = os.path.abspath(os.path.expanduser(path.strip()))
+    if not os.path.isdir(path):
+        raise ValueError("VFace 扩展包目录不存在：" + path)
+    set_setting("vface_root", path)
+    cmds.optionVar(stringValue=("yuejunToolbox_vfaceRoot", path))
     return path

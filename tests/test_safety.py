@@ -419,7 +419,7 @@ class ConfigurationAndUiTests(unittest.TestCase):
         events = []
         with patch.object(ui, "close", side_effect=lambda: events.append("close")), patch.object(ui, "show", side_effect=lambda: events.append("show")), patch.object(importlib, "reload", side_effect=lambda module: events.append(module.__name__)):
             yuejun_toolbox.reload_toolbox()
-        self.assertEqual(events, ["close", "yuejun_toolbox.config", "yuejun_toolbox.preview", "yuejun_toolbox.project", "yuejun_toolbox.core", "yuejun_toolbox.eyes", "yuejun_toolbox.notes_data", "yuejun_toolbox.notes", "yuejun_toolbox.ui", "show"])
+        self.assertEqual(events, ["close", "yuejun_toolbox.config", "yuejun_toolbox.preview", "yuejun_toolbox.project", "yuejun_toolbox.core", "yuejun_toolbox.eyes", "yuejun_toolbox.vface", "yuejun_toolbox.vface_ui", "yuejun_toolbox.notes_data", "yuejun_toolbox.notes", "yuejun_toolbox.ui", "show"])
 
     def test_python37_grammar(self):
         if sys.version_info < (3, 8):
@@ -429,6 +429,83 @@ class ConfigurationAndUiTests(unittest.TestCase):
         for path in files:
             with self.subTest(path=path.name):
                 ast.parse(path.read_text(encoding="utf-8"), filename=str(path), feature_version=(3, 7))
+
+
+class VFaceLibraryTests(unittest.TestCase):
+    def test_settings_live_under_selected_library(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(config, "resource_root", return_value=root):
+            config.set_setting("vface_root", "F:/VFace")
+            config.set_setting("another_setting", 1)
+            self.assertEqual(config.vface_root(), "F:/VFace")
+            self.assertEqual(config.settings()["another_setting"], 1)
+            self.assertTrue((Path(root) / "Settings" / "toolbox.json").is_file())
+
+    def test_legacy_asset_keys_resolve_reorganized_library(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(config, "resource_root", return_value=root):
+            scene = Path(root) / "RenderPresets" / "Arnold" / "Base_Arnold.ma"
+            scene.parent.mkdir(parents=True)
+            scene.write_text("test")
+            self.assertEqual(config.asset_path("Maya_shader_node/Arnold/Base_Arnold.ma"), str(scene))
+
+    def test_package_sync_migrates_hash_paths_and_reuses_readable_copy(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder) / "project"
+            library = Path(folder) / "library"
+            source = Path(folder) / "pack" / "115" / "01_head" / "maps" / "albedo.exr"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"source")
+            with patch.object(project, "require_project", return_value=str(root)), patch.object(config, "resource_root", return_value=str(library)), patch.object(project, "rule_directory", side_effect=lambda root, rule, default: os.path.join(root, default)):
+                session = project.SyncSession()
+                session.register_package(str(source.parents[2]), "VFace/115")
+                old = root / "sourceimages/Yuejun/External/30a864f091ef/albedo.exr"
+                old.parent.mkdir(parents=True)
+                old.write_bytes(b"old artist file")
+                key = project.normalize(str(source)) + "|texture"
+                session.index[key] = {"target": session.relative(str(old))}
+                mapped = session.resource(str(source))
+                self.assertIn("VFace/115/01_head/maps", mapped)
+                self.assertEqual(session.copied, 1)
+                self.assertEqual(session.resource(str(source)), mapped)
+                self.assertEqual(session.copied, 1)
+                self.assertEqual(old.read_bytes(), b"old artist file")
+
+    def test_readable_revision_preserves_artist_edits(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "asset.exr"
+            source.write_bytes(b"new")
+            first = root / "versions" / "Revision_001"
+            first.mkdir(parents=True)
+            (first / source.name).write_bytes(b"artist")
+            self.assertEqual(project.revision_folder(str(root), [str(source)]), str(root / "versions/Revision_002"))
+            (first / source.name).write_bytes(b"new")
+            self.assertEqual(project.revision_folder(str(root), [str(source)]), str(first))
+
+    def test_discovery_lists_complete_sets_and_accepts_one_identity(self):
+        from yuejun_toolbox import vface
+        with tempfile.TemporaryDirectory() as root:
+            complete = Path(root) / "115"
+            for relative in vface.FILES.values():
+                path = complete / "01_head" / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"test")
+            (Path(root) / "116" / "01_head").mkdir(parents=True)
+            self.assertEqual(vface.discover(root), [("115", str(complete))])
+            self.assertEqual(vface.discover(str(complete)), [("115", str(complete))])
+
+    def test_missing_calibrated_map_never_edits_scene(self):
+        from yuejun_toolbox import vface
+        with tempfile.TemporaryDirectory() as root, patch.object(vface, "cmds") as commands:
+            with self.assertRaisesRegex(core.ToolError, "dispCalibrated"):
+                vface.apply(root)
+            commands.assert_not_called()
+            self.assertEqual(commands.mock_calls, [])
+
+    def test_vface_is_hidden_in_vray_mode(self):
+        arnold = {tool.key for _, group in config.visible_groups(False) for tool in group}
+        vray = {tool.key for _, group in config.visible_groups(True) for tool in group}
+        self.assertIn("vface_browser", arnold)
+        self.assertNotIn("vface_browser", vray)
 
 
 if __name__ == "__main__":

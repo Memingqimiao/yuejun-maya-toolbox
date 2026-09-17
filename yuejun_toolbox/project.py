@@ -43,12 +43,40 @@ def require_project():
     if os.path.normcase(root) == os.path.normcase(default):
         raise ProjectError("当前是 Maya 默认项目。请先在项目窗口创建自己的工作项目。")
     library = os.path.realpath(config.resource_root())
-    if inside(root, library) or inside(library, root):
+    managed = normalize(root) == normalize(os.path.join(library, "Projects", "Default"))
+    if (inside(root, library) or inside(library, root)) and not managed:
         raise ProjectError("工作项目和素材库不能相同或互相包含，请设置独立的项目目录。")
     for rule, fallback in (("scene", "scenes"), ("sourceImages", "sourceimages"),
                            ("images", "images"), ("renderData", "renderData")):
         rule_directory(root, rule, fallback)
     return root
+
+
+def ensure_project():
+    """Use the user's valid project or one reusable, isolated library workspace."""
+    try:
+        return require_project()
+    except ProjectError:
+        pass
+    library = os.path.realpath(config.resource_root())
+    root = os.path.realpath(os.path.join(library, "Projects", "Default"))
+    if not inside(root, library) or root == library:
+        raise ProjectError("默认项目目录指向素材库之外，请检查 Projects 目录。")
+    os.makedirs(root, exist_ok=True)
+    workspace = os.path.join(root, "workspace.mel")
+    rules = (("scene", "scenes"), ("sourceImages", "sourceimages"), ("images", "images"),
+             ("renderData", "renderData"), ("fileCache", "cache/nCache"),
+             ("diskCache", "data"), ("sound", "sound"))
+    if not os.path.isfile(workspace):
+        with open(workspace, "x", encoding="utf-8") as stream:
+            stream.write("// Yuejun Toolbox reusable Maya project\n")
+            for rule, folder in rules:
+                stream.write('workspace -fr "{}" "{}";\n'.format(rule, folder))
+    cmds.workspace(root, openWorkspace=True)
+    for rule, folder in rules:
+        path = rule_directory(root, rule, folder)
+        os.makedirs(path, exist_ok=True)
+    return require_project()
 
 
 def digest(path):
@@ -61,6 +89,19 @@ def digest(path):
 
 def normalize(path):
     return os.path.normcase(os.path.realpath(path))
+
+
+def revision_folder(parent, files):
+    """Readable revision numbers; reuse a matching revision without overwriting edits."""
+    checksums = {os.path.basename(path): digest(path) for path in files}
+    for number in range(1, 10000):
+        folder = os.path.join(parent, "versions", "Revision_{:03d}".format(number))
+        if not os.path.exists(folder):
+            return folder
+        if all(os.path.isfile(os.path.join(folder, name)) and digest(os.path.join(folder, name)) == checksum
+               for name, checksum in checksums.items()):
+            return folder
+    raise ProjectError("素材版本过多，请整理：" + parent)
 
 
 class SyncSession(object):
@@ -85,6 +126,12 @@ class SyncSession(object):
             if not isinstance(self.index, dict):
                 raise ProjectError("项目同步记录格式错误。")
         self._basenames = None
+        self.packages = []
+
+    def register_package(self, source_root, name):
+        if not re.fullmatch(r"[A-Za-z0-9_./ -]+", name) or ".." in name.split("/"):
+            raise ProjectError("扩展包名称不合法：" + name)
+        self.packages.append((os.path.realpath(source_root), name))
 
     def relative(self, path):
         return os.path.relpath(path, self.root).replace("\\", "/")
@@ -104,10 +151,13 @@ class SyncSession(object):
             if not inside(result, self.root):
                 raise ProjectError("预览资源目标位于项目之外。")
             return result
-        if inside(source, self.library):
-            relative = os.path.relpath(source, self.library)
+        package = next(((root, name) for root, name in self.packages if inside(source, root)), None)
+        if package:
+            relative = os.path.join(package[1], os.path.relpath(source, package[0]))
+        elif inside(source, self.library):
+            relative = config.modern_path(os.path.relpath(source, self.library)).replace("/", os.sep)
             # Keep one recognizable Arnold directory under each Maya file rule.
-            arnold = os.path.join("Maya_shader_node", "Arnold") + os.sep
+            arnold = os.path.join("RenderPresets", "Arnold") + os.sep
             if relative.startswith(arnold):
                 tail = relative[len(arnold):]
                 for prefix in ("sourceimages" + os.sep, "renderData" + os.sep):
@@ -115,8 +165,9 @@ class SyncSession(object):
                         tail = tail[len(prefix):]
                 relative = os.path.join("Arnold", tail)
         else:
-            parent_hash = hashlib.sha256(normalize(os.path.dirname(source)).encode("utf-8")).hexdigest()[:12]
-            relative = os.path.join("External", parent_hash, os.path.basename(source))
+            # Preserve a readable source hierarchy, including drive/server identity.
+            readable = re.sub(r"[:<>\"|?*]", "_", os.path.abspath(source)).lstrip("/\\")
+            relative = os.path.join("External", readable)
         result = os.path.realpath(os.path.join(base, "Yuejun", relative))
         if not inside(result, self.root):
             raise ProjectError("同步目标超出了项目：" + result)
@@ -136,7 +187,8 @@ class SyncSession(object):
             recorded = os.path.realpath(os.path.join(self.root, previous["target"]))
             if not inside(recorded, self.root):
                 raise ProjectError("同步记录中的目标位于项目之外。")
-            if os.path.isfile(recorded):
+            legacy_hash = re.search(r"(?:^|/)External/[0-9a-f]{12}/", previous["target"].replace("\\", "/"))
+            if os.path.isfile(recorded) and not legacy_hash:
                 target = recorded
         if target_override:
             target = os.path.realpath(target_override)
@@ -161,7 +213,7 @@ class SyncSession(object):
             else:
                 # Keep artist edits; deduplicate the new source revision separately.
                 base = self.destination(source, category)
-                target = os.path.join(os.path.dirname(base), "versions", source_hash, os.path.basename(base))
+                target = os.path.join(revision_folder(os.path.dirname(base), [source]), os.path.basename(base))
                 if not inside(target, self.root):
                     raise ProjectError("版本目录位于项目之外。")
                 if os.path.isfile(target) and digest(target) != source_hash:
@@ -217,10 +269,11 @@ class SyncSession(object):
                 candidates.append(os.path.join(folder, raw))
                 candidates.append(os.path.join(folder, "sourceimages", raw))
                 folder = os.path.dirname(folder)
-        for marker in ("Maya_Texture", "Maya_Light", "Maya_Model", "Maya_shader_node"):
+        for marker in ("Maya_Texture", "Maya_Light", "Maya_Model", "Maya_shader_node",
+                       "Textures", "Lights", "Models", "RenderPresets", "NodePresets"):
             match = re.search(r"(?:^|/)" + marker + r"/(.*)$", raw, re.I)
             if match:
-                candidates.append(os.path.join(self.library, marker, match.group(1)))
+                candidates.insert(0, os.path.join(self.library, config.modern_path(marker + "/" + match.group(1))))
         for path in candidates:
             if pattern_files(path):
                 return os.path.normpath(path)
@@ -228,7 +281,7 @@ class SyncSession(object):
         if self._basenames is None:
             self._basenames = {}
             for folder, dirs, files in os.walk(self.library, followlinks=False):
-                dirs[:] = [name for name in dirs if name not in ("_Backups", ".mayaSwatches") and
+                dirs[:] = [name for name in dirs if name not in ("_Backups", ".mayaSwatches", "Projects", "Settings") and
                            not os.path.islink(os.path.join(folder, name))]
                 for name in files:
                     self._basenames.setdefault(name.lower(), []).append(os.path.join(folder, name))
@@ -255,8 +308,7 @@ class SyncSession(object):
             folders = {os.path.dirname(path) for path in copied_paths}
             if len(folders) > 1:
                 # Keep UDIM/sequence filenames together even when one tile has artist edits.
-                revision = hashlib.sha256("".join(digest(path) for path in files).encode("ascii")).hexdigest()
-                folder = os.path.join(os.path.dirname(self.destination(source, category)), "versions", revision)
+                folder = revision_folder(os.path.dirname(self.destination(source, category)), files)
                 for path in files:
                     self.copy_file(path, category, target_override=os.path.join(folder, os.path.basename(path)))
                     sidecar = os.path.splitext(path)[0] + ".tx"
