@@ -1,25 +1,40 @@
 # 更新记录
 
+## 3.7.8
+
+- 默认预览工程移出素材库，改用 Maya 用户目录下的 `projects/Yuejun_Default`，可用 `Settings/toolbox.json` 的 `default_project_root` 指定；配置指向素材库内部会被拒绝。
+- 素材库内旧的 `Projects/Default` 仍被识别为受管工程，不会触发“项目与素材库互相包含”的报错。
+- 清理 Arnold 相关素材里残留的 V-Ray 渲染设置节点（`vraySettings` 及 `vrayformaya` 插件依赖），未加载 V-Ray 时不再报未知节点。
+- 项目检查报告中的未知节点提示改为指向“清理无效节点”按钮。
+
+## 3.7.7
+
+- 工具路径直接写当前目录名（RenderPresets / NodePresets / Models / Scripts / Textures / Lights），不再经过旧名映射；旧命名的素材库仍可作为回退被识别。
+- 主窗口“资源与工具设置”去掉重复的 VFace 扩展包路径，VFace 目录只在 VFace 浏览器里选择。
+- “眼球”和“VFace 素材”合并为一个“素材”分组，眼球颜色与贴图精度仍在该组顶部。
+- 素材库整理：删除与新目录完全重复的 Maya_* 旧目录及 3.7.4 迁移备份，Scripts 分出 `_工具箱历史版本` 与 `_未使用的老脚本`。
+
+## 3.7.6
+
+- GN 快捷工具新增“检查 GN 安装”和“安装 GN 插件”。
+- 检查会报告素材库安装包、Maya 端文件、userSetup 自启动、当前会话命令及 ZBrush 端状态，不修改任何文件。
+- 安装会把 `Plugins/GN_ImportExport_v*` 复制到 Maya 用户脚本目录和 ZBrush 的 `ZStartup/ZPlugs64`，追加自启动（原 userSetup.mel 先备份），并在当前会话直接载入 GN 菜单。
+- 存在多个版本时自动选用版本号最大的安装包；ZBrush 目录可用 `Settings/toolbox.json` 的 `zbrush_root` 指定。
+
 ## 3.7.5
 
-- 移除首页重复的 VFace 扩展包目录设置，统一使用 VFace 素材窗口的目录选择。
-- 整理完整源码、单文件版本和跨电脑接续开发说明。
+- BS 工具不再要求 MetaHuman 命名：`BS切换` 改为基于选择，任意两个拓扑一致的模型都能传递造型。
+- 同时选中新形状和被修改模型即可一步完成；只选一个则使用 `BS先点我` 标记的形状。
+- `BS先点我` 改为记录选中模型（按 UUID，重命名后仍有效），不再把模型改名为 Mubiao。
+- 拓扑不一致时先报告两者的点、边、面数并拒绝执行，不改动场景。
+- 新增“BS切换后删除新形状模型”勾选框，默认删除；清除历史若带走蒙皮等变形器会在状态栏说明。
+- 不再依赖 `Maya_Script/Skin_BSqiehuan.mel`。
 
 ## 3.7.4
 
-- VFace 作为外部扩展包，在主窗口独立设置目录，设置保存到素材库 Settings/toolbox.json。
-- 素材库分类为 RenderPresets、NodePresets、Models、Scripts、Textures、Lights；兼容旧资源键。
-- 打开预设和切换 VFace 时自动创建/复用 Projects/Default。
-- 眼睛、泪线、眉毛、睫毛随头部同步切换，眼白连接左右配套贴图，场景按类别分组。
-- 项目内扩展包使用 VFace/编号/原目录结构，冲突副本使用 Revision_001 等名称。
-- 修正 Maya 2022 Arnold AOV 回调导致首次眼白材质创建后重做中断的问题。
-
-## 3.7.3
-
-- Arnold 模式新增 VFace 素材选择窗口，支持睁眼头部和三张配套贴图切换。
-- 使用校准置换红通道和线性 sRGB albedo，保留共用 ID 遮罩及原模板渲染设置。
-- 复用项目资源及隐藏网格，切换状态可撤销；拒绝带历史、下游依赖、引用或锁定的头部。
-- 在独立 Maya 2022 会话验证 074 / 115 切换、UV、撤销、项目路径及预览保护。
+- 素材库改用 RenderPresets / NodePresets / Models 等新目录名，旧路径自动映射。
+- 新增 `Settings/toolbox.json` 配置存储。
+- 新增 VFace 素材浏览器，可切换配套 Arnold 预设的头部与贴图。
 
 ## 3.7.2
 

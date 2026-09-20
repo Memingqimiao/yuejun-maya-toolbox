@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Yuejun Toolbox 3.7.5 - Paste all into Maya's Python tab.
+# Yuejun Toolbox 3.7.8 - Paste all into Maya's Python tab.
 import sys as _yj_sys
 import types as _yj_types
 _yj_sources = {}
@@ -17,14 +17,16 @@ from maya import cmds
 ROOT_OPTION = "yuejunToolbox_resourceRoot"
 DEFAULT_ROOT = "C:/Yuejun_ToolBox"
 OLD_DEFAULT_ROOT = "C:/Yunuo_Issue_01"
-# Legacy keys remain accepted so existing scenes and shelf scripts still resolve.
-PATH_MAPPINGS = (
-    ("Maya_shader_node/Arnold", "RenderPresets/Arnold"),
-    ("Maya_shader_node/Test_Vray.mb", "RenderPresets/VRay/Test_Vray.mb"),
-    ("Maya_shader_node", "NodePresets"),
-    ("Maya_Model", "Models"), ("Maya_Script", "Scripts"),
-    ("Maya_Texture", "Textures"), ("Maya_Light", "Lights"),
+# Tool paths use the current folder names. Older libraries that still carry the
+# pre-3.7.4 names are resolved through these pairs by asset_path.
+LEGACY_FOLDERS = (
+    ("RenderPresets/Arnold", "Maya_shader_node/Arnold"),
+    ("RenderPresets/VRay/Test_Vray.mb", "Maya_shader_node/Test_Vray.mb"),
+    ("NodePresets", "Maya_shader_node"),
+    ("Models", "Maya_Model"), ("Scripts", "Maya_Script"),
+    ("Textures", "Maya_Texture"), ("Lights", "Maya_Light"),
 )
+REQUIRED_FOLDERS = ("RenderPresets", "NodePresets", "Models", "Scripts", "Textures", "Lights")
 ROOT_MIGRATED_OPTION = "yuejunToolbox_rootMigrated31"
 Tool = namedtuple("Tool", "key label kind path help")
 PROJECT_GROUP = ("项目管理", (
@@ -37,33 +39,33 @@ GROUPS = (
     ("GN 快捷工具", (
         Tool("gn_import", "GN 导入", "gn", "GN_Import", "需要已安装 GN 插件；执行其原生导入流程。"),
         Tool("gn_export", "GN 导出", "gn", "GN_Export", "需要已安装 GN 插件；执行其原生导出流程。"),
+        Tool("gn_check", "检查 GN 安装", "gn_manage", "", "检查素材库安装包、Maya 端文件、userSetup 自启动及 ZBrush 端，显示详细报告；不修改任何文件。"),
+        Tool("gn_install", "安装 GN 插件", "gn_manage", "", "把素材库 Plugins 中的 GN 安装包复制到 Maya 用户脚本目录和 ZBrush 插件目录，写入自启动并在当前会话载入菜单。"),
     )),
     ("Skin", (
-        Tool("cut_uv", "Skin 切 UV", "mel", "Maya_Script/Skin_qieUV.mel", "仅适用于原配 Skin 拓扑；再次执行会再次偏移 UV。"),
-        Tool("restore_uv", "Skin 恢复 UV", "mel", "Maya_Script/Skin_huifuUV.mel", "原配模型的反向 UV 偏移及合并；不是通用 UV 备份恢复。"),
+        Tool("cut_uv", "Skin 切 UV", "mel", "Scripts/Skin_qieUV.mel", "仅适用于原配 Skin 拓扑；再次执行会再次偏移 UV。"),
+        Tool("restore_uv", "Skin 恢复 UV", "mel", "Scripts/Skin_huifuUV.mel", "原配模型的反向 UV 偏移及合并；不是通用 UV 备份恢复。"),
         Tool("vray_skin", "V-Ray 设置 · −0.5", "core", "", "需要已加载 V-Ray；在 Skin 网格上设置细分和置换属性。"),
     )),
     ("场景预设", (
-        Tool("preset_vray", "打开 V-Ray 预设", "open", "Maya_shader_node/Test_Vray.mb", "直接打开 V-Ray 预设文件，替换当前场景；有未保存修改时先提示。"),
-        Tool("preset_arnold", "打开 Arnold 预设", "open", "Maya_shader_node/Arnold/Base_Arnold.ma", "打开素材库中的 Arnold 预设；保留材质、灯光及渲染设置，有未保存修改时先提示。"),
+        Tool("preset_vray", "打开 V-Ray 预设", "open", "RenderPresets/VRay/Test_Vray.mb", "直接打开 V-Ray 预设文件，替换当前场景；有未保存修改时先提示。"),
+        Tool("preset_arnold", "打开 Arnold 预设", "open", "RenderPresets/Arnold/Base_Arnold.ma", "打开素材库中的 Arnold 预设；保留材质、灯光及渲染设置，有未保存修改时先提示。"),
     )),
-    ("VFace 素材", (
-        Tool("vface_browser", "选择 VFace 头部与贴图…", "ui", "", "打开 VFace 素材目录，切换配套 Arnold 预设的头部及贴图。"),
+    ("素材", (
+        Tool("import_eye", "导入 V-Ray 眼球", "import", "Models/VRay_eye.mb", "将 V-Ray 眼球和可用贴图同步到当前项目后导入。"),
+        Tool("import_eye_arnold", "导入 Arnold 眼球", "import", "Models/Eye_Arnold/Arnold_eye.ma", "将 Arnold 眼球及配套贴图同步到当前项目后导入；需要 Arnold 插件。"),
+        Tool("vface_browser", "VFace 头部与贴图…", "ui", "", "打开 VFace 素材浏览器，在其中选择素材目录并切换配套 Arnold 预设的头部及贴图。"),
     )),
     ("材质节点", (
-        Tool("disp", "Disp", "import", "Maya_shader_node/Disp.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
-        Tool("micro", "Micro", "import", "Maya_shader_node/Micro.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
-        Tool("disp_black", "Disp Black", "import", "Maya_shader_node/Disp_Black.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
-    )),
-    ("眼球", (
-        Tool("import_eye", "导入 V-Ray 眼球", "import", "Maya_Model/VRay_eye.mb", "将 V-Ray 眼球和可用贴图同步到当前项目后导入。"),
-        Tool("import_eye_arnold", "导入 Arnold 眼球", "import", "Maya_Model/Eye_Arnold/Arnold_eye.ma", "将 Arnold 眼球及配套贴图同步到当前项目后导入；需要 Arnold 插件。"),
+        Tool("disp", "Disp", "import", "NodePresets/Disp.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
+        Tool("micro", "Micro", "import", "NodePresets/Micro.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
+        Tool("disp_black", "Disp Black", "import", "NodePresets/Disp_Black.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
     )),
     ("目标与生长体", (
-        Tool("import_growth", "导入生长体", "legacy_import", "Maya_Model/Skin_shengzhangti.mb", "初版命令：直接导入生长体文件。"),
-        Tool("update_growth", "更新生长体", "legacy_mel", "Maya_Script/Skin_chuangjianshengzhangti.Mel", "初版 MEL：使用 Skin UV 对应更新生长体，并清除脚本指定对象的历史。"),
-        Tool("rename_target", "BS先点我", "core", "", "初版命令：将当前第一个选中对象重命名为 Mubiao。"),
-        Tool("blend_target", "BS切换", "legacy_mel", "Maya_Script/Skin_BSqiehuan.mel", "初版 MEL：创建并应用 BS，清除历史后删除 Mubiao。"),
+        Tool("import_growth", "导入生长体", "legacy_import", "Models/Skin_shengzhangti.mb", "初版命令：直接导入生长体文件。"),
+        Tool("update_growth", "更新生长体", "legacy_mel", "Scripts/Skin_chuangjianshengzhangti.Mel", "初版 MEL：使用 Skin UV 对应更新生长体，并清除脚本指定对象的历史。"),
+        Tool("rename_target", "BS先点我", "core", "", "选中新形状模型，记住它作为 BS 目标形状；不改名、不修改场景。"),
+        Tool("blend_target", "BS切换", "core", "", "把目标形状的造型传到被修改模型上并烘焙历史。同时选中两个模型（先新形状后被改模型）即可一步完成；只选一个则使用上一次标记的目标形状。要求两者拓扑完全一致。"),
     )),
     ("工具和帮助", (
         Tool("expression_notes", "XGen 表达式速查", "ui", "", "查看整理好的表达式、操作步骤并复制代码。"),
@@ -73,7 +75,7 @@ GROUPS = (
 )
 TOOLS = {tool.key: tool for _, group in GROUPS for tool in group}
 TOOLS.update({tool.key: tool for tool in PROJECT_GROUP[1]})
-GROUP_COLUMNS = {"材质节点": 3, "眼球": 2, "项目管理": 3}
+GROUP_COLUMNS = {"材质节点": 3, "素材": 2, "项目管理": 3}
 VRAY_TOOLS = {"vray_skin", "preset_vray", "import_eye", "disp", "micro", "disp_black"}
 ARNOLD_TOOLS = {"preset_arnold", "import_eye_arnold", "vface_browser"}
 
@@ -105,19 +107,16 @@ def set_resource_root(path):
     path = os.path.abspath(os.path.expanduser(path.strip()))
     if not os.path.isdir(path):
         raise ValueError("资源文件夹不存在：{}".format(path))
-    if not any(os.path.isdir(os.path.join(path, name)) for name in
-               ("Maya_Script", "Maya_Model", "Maya_shader_node", "Maya_Texture", "Maya_Light",
-                "RenderPresets", "NodePresets", "Models", "Scripts")):
-        raise ValueError("请选择包含 Maya_Script、Maya_Model 等子目录的资源根目录。")
+    accepted = REQUIRED_FOLDERS + tuple(legacy for _, legacy in LEGACY_FOLDERS if "/" not in legacy)
+    if not any(os.path.isdir(os.path.join(path, name)) for name in accepted):
+        raise ValueError("请选择包含 RenderPresets、NodePresets、Models 等子目录的资源根目录。")
     cmds.optionVar(stringValue=(ROOT_OPTION, path))
     return path
 
 
 def asset_path(relative):
     root = os.path.realpath(resource_root())
-    migrated = modern_path(relative)
-    if os.path.exists(os.path.join(root, migrated)) or not os.path.exists(os.path.join(root, relative)):
-        relative = migrated
+    relative = resolve_folder(root, relative)
     path = os.path.realpath(os.path.join(root, relative))
     if os.path.commonpath((root, path)) != root:
         raise ValueError("资源路径不能超出资源根目录。")
@@ -139,11 +138,25 @@ def asset_path(relative):
     return path
 
 
-def modern_path(relative):
+def resolve_folder(root, relative):
+    """Keep the current folder name; fall back to the pre-3.7.4 one if it is missing."""
     relative = relative.replace("\\", "/")
-    for old, new in PATH_MAPPINGS:
-        if relative == old or relative.startswith(old + "/"):
-            return new + relative[len(old):]
+    if os.path.exists(os.path.join(root, relative)):
+        return relative
+    for current, legacy in LEGACY_FOLDERS:
+        if relative == current or relative.startswith(current + "/"):
+            candidate = legacy + relative[len(current):]
+            if os.path.exists(os.path.join(root, candidate)):
+                return candidate
+    return relative
+
+
+def current_path(relative):
+    """Rewrite a pre-3.7.4 folder name to the current one, for naming inside projects."""
+    relative = relative.replace("\\", "/")
+    for current, legacy in LEGACY_FOLDERS:
+        if relative == legacy or relative.startswith(legacy + "/"):
+            return current + relative[len(legacy):]
     return relative
 
 
@@ -320,6 +333,35 @@ def rule_directory(root, rule, default):
     return path
 
 
+def default_project_root():
+    """Reusable preview workspace, deliberately kept outside the resource library."""
+    configured = config.settings().get("default_project_root", "")
+    if configured:
+        root = os.path.realpath(os.path.expanduser(configured))
+    else:
+        root = os.path.realpath(os.path.join(cmds.internalVar(userAppDir=True),
+                                             "projects", "Yuejun_Default"))
+    library = os.path.realpath(config.resource_root())
+    if inside(root, library) or inside(library, root):
+        raise ProjectError("默认工程不能放在素材库内部。请修改 Settings/toolbox.json 中的 "
+                           "default_project_root。")
+    return root
+
+
+def managed_roots():
+    """The default workspace, plus the pre-3.7.8 one inside the library."""
+    roots = []
+    try:
+        roots.append(default_project_root())
+    except ProjectError:
+        pass
+    try:
+        roots.append(os.path.realpath(os.path.join(config.resource_root(), "Projects", "Default")))
+    except Exception:
+        pass
+    return roots
+
+
 def require_project():
     root = root_directory()
     if not os.path.isfile(os.path.join(root, "workspace.mel")):
@@ -328,7 +370,7 @@ def require_project():
     if os.path.normcase(root) == os.path.normcase(default):
         raise ProjectError("当前是 Maya 默认项目。请先在项目窗口创建自己的工作项目。")
     library = os.path.realpath(config.resource_root())
-    managed = normalize(root) == normalize(os.path.join(library, "Projects", "Default"))
+    managed = any(normalize(root) == normalize(candidate) for candidate in managed_roots())
     if (inside(root, library) or inside(library, root)) and not managed:
         raise ProjectError("工作项目和素材库不能相同或互相包含，请设置独立的项目目录。")
     for rule, fallback in (("scene", "scenes"), ("sourceImages", "sourceimages"),
@@ -338,15 +380,12 @@ def require_project():
 
 
 def ensure_project():
-    """Use the user's valid project or one reusable, isolated library workspace."""
+    """Use the user's valid project or one reusable workspace outside the library."""
     try:
         return require_project()
     except ProjectError:
         pass
-    library = os.path.realpath(config.resource_root())
-    root = os.path.realpath(os.path.join(library, "Projects", "Default"))
-    if not inside(root, library) or root == library:
-        raise ProjectError("默认项目目录指向素材库之外，请检查 Projects 目录。")
+    root = default_project_root()
     os.makedirs(root, exist_ok=True)
     workspace = os.path.join(root, "workspace.mel")
     rules = (("scene", "scenes"), ("sourceImages", "sourceimages"), ("images", "images"),
@@ -440,7 +479,7 @@ class SyncSession(object):
         if package:
             relative = os.path.join(package[1], os.path.relpath(source, package[0]))
         elif inside(source, self.library):
-            relative = config.modern_path(os.path.relpath(source, self.library)).replace("/", os.sep)
+            relative = config.current_path(os.path.relpath(source, self.library)).replace("/", os.sep)
             # Keep one recognizable Arnold directory under each Maya file rule.
             arnold = os.path.join("RenderPresets", "Arnold") + os.sep
             if relative.startswith(arnold):
@@ -558,7 +597,8 @@ class SyncSession(object):
                        "Textures", "Lights", "Models", "RenderPresets", "NodePresets"):
             match = re.search(r"(?:^|/)" + marker + r"/(.*)$", raw, re.I)
             if match:
-                candidates.insert(0, os.path.join(self.library, config.modern_path(marker + "/" + match.group(1))))
+                candidates.insert(0, os.path.join(self.library, config.resolve_folder(
+                    self.library, config.current_path(marker + "/" + match.group(1)))))
         for path in candidates:
             if pattern_files(path):
                 return os.path.normpath(path)
@@ -844,7 +884,8 @@ def audit():
             issues.append("项目外快照目录：" + match.group(1))
     unknown = cmds.ls(type="unknown") or []
     if unknown:
-        issues.append("存在未知节点，其资源无法完整检查：" + "、".join(unknown))
+        issues.append("存在未知节点，其资源无法完整检查：" + "、".join(unknown) +
+                      "。可用“工具和帮助 → 清理无效节点”移除。")
     return "当前项目：{}\n检查了 {} 个资源路径。\n{}".format(
         root, len(paths), "\n".join(issues) if issues else "检查通过：已检查的资源均位于项目内且存在。") + \
         "\n\n检查范围：Maya 文件路径编辑器注册资源、常用贴图 / 缓存 / 音频、场景引用和 RenderView 快照。未注册插件的私有路径可能需要插件自身检查。"
@@ -961,13 +1002,96 @@ def named_mesh(name, editable=False):
     return mesh(next(iter(candidates)), editable=editable)
 
 
-def rename_target():
-    """Original BS preparation command: rename the first selected object."""
-    selected = cmds.ls(selection=True)
-    if selected:
-        actual = cmds.rename(selected[0], "Mubiao")
-        return "Successfully renamed the model to {}.".format(actual)
-    return "No objects selected."
+_BLEND_SOURCE = {"uuid": "", "name": ""}
+
+
+def _short(node):
+    return node.rsplit("|", 1)[-1]
+
+
+def _topology(mesh_fn):
+    return mesh_fn.numVertices, mesh_fn.numEdges, mesh_fn.numPolygons
+
+
+def _selected_meshes():
+    """Selected mesh transforms in pick order, without duplicates."""
+    result = []
+    for node in cmds.ls(selection=True, long=True, objectsOnly=True) or []:
+        if node not in result and (
+                cmds.nodeType(node) == "mesh" or
+                cmds.listRelatives(node, shapes=True, noIntermediate=True, type="mesh")):
+            result.append(node)
+    return result
+
+
+def mark_blend_source():
+    """Remember the selected mesh as the BS source shape; the scene is not changed."""
+    selected = _selected_meshes()
+    if len(selected) != 1:
+        raise ToolError("请只选中一个新形状模型，当前选中 {} 个网格。".format(len(selected)))
+    node, _, mesh_fn = mesh(selected[0])
+    # UUIDs survive renaming and reparenting, unlike the original fixed Mubiao name.
+    _BLEND_SOURCE["uuid"] = (cmds.ls(node, uuid=True) or [""])[0]
+    _BLEND_SOURCE["name"] = _short(node)
+    return "已记住目标形状：{}（{} 点 / {} 面）。再选中要被修改的模型，点击 BS切换。".format(
+        _short(node), mesh_fn.numVertices, mesh_fn.numPolygons)
+
+
+def _marked_blend_source():
+    if not _BLEND_SOURCE["uuid"]:
+        raise ToolError("尚未标记目标形状。请先选中新形状模型点击“BS先点我”，或同时选中两个模型再点击本按钮。")
+    matches = cmds.ls(_BLEND_SOURCE["uuid"], long=True) or []
+    if len(matches) != 1:
+        raise ToolError("标记的目标形状 {} 已不在场景中，请重新点击“BS先点我”。".format(
+            _BLEND_SOURCE["name"] or "模型"))
+    return matches[0]
+
+
+def blend_target(delete_source=True):
+    """Transfer a shape between any two meshes that share the same topology.
+
+    The original MEL required MetaHuman naming: it blended a node called Mubiao
+    onto a node called Skin. Both meshes now come from the selection instead.
+    """
+    selected = _selected_meshes()
+    if len(selected) > 2:
+        raise ToolError("最多选中两个模型（先新形状、后被修改模型），当前选中 {} 个。".format(len(selected)))
+    if len(selected) == 2:
+        source_node, base_node = selected
+    elif len(selected) == 1:
+        source_node, base_node = _marked_blend_source(), selected[0]
+    else:
+        raise ToolError("请选中要被修改的模型；或同时选中新形状和被修改模型。")
+
+    source, _, source_fn = mesh(source_node, editable=delete_source)
+    base, _, base_fn = mesh(base_node, editable=True)
+    if source == base:
+        raise ToolError("新形状和被修改模型不能是同一个：{}。".format(_short(base)))
+    if _topology(source_fn) != _topology(base_fn):
+        raise ToolError(
+            "两个模型拓扑不一致，无法传递形状。{}：{} 点 / {} 边 / {} 面；{}：{} 点 / {} 边 / {} 面。"
+            "请使用点、边、面数量完全相同的模型。".format(
+                _short(source), *(_topology(source_fn) + (_short(base),) + _topology(base_fn))))
+
+    # The original MEL ran delete -ch too; name the deformers it will take with it.
+    existing = [node for node in set(cmds.listHistory(base, pruneDagObjects=True) or [])
+                if cmds.nodeType(node) in ("skinCluster", "blendShape", "cluster", "lattice",
+                                           "wrap", "deltaMush", "nonLinear", "ffd")]
+    with undo_chunk("blend_target"):
+        deformer = cmds.blendShape(source, base, weight=(0, 1.0))[0]
+        cmds.setAttr(deformer + ".envelope", 1)
+        cmds.delete(base, constructionHistory=True)
+        if delete_source:
+            cmds.delete(source)
+        cmds.select(base, replace=True)
+    if delete_source and _BLEND_SOURCE["uuid"] and not cmds.ls(_BLEND_SOURCE["uuid"]):
+        _BLEND_SOURCE.update(uuid="", name="")
+    return "已将 {} 的造型传给 {} 并清除历史{}（可撤销）。{}".format(
+        _short(source), _short(base),
+        "，已删除新形状模型" if delete_source else "，保留新形状模型",
+        "注意：清除历史同时移除了 {} 上原有的 {}。".format(
+            _short(base), "、".join(sorted({cmds.nodeType(node) for node in existing})))
+        if existing else "")
 
 
 def run_legacy_mel(relative):
@@ -1226,7 +1350,7 @@ def run_gn(procedure):
     if procedure not in ("GN_Import", "GN_Export"):
         raise ToolError("未知 GN 命令。")
     if not mel.eval('exists "{}"'.format(procedure)):
-        raise ToolError("找不到 {}，请先安装 GN 并将其脚本加入 Maya 路径。".format(procedure))
+        raise ToolError("找不到 {}。请先点击“检查 GN 安装”确认状态，或点击“安装 GN 插件”。".format(procedure))
     # GN owns its file dialogs, scene edits and undo behavior.
     session = project.SyncSession() if procedure == "GN_Import" else None
     before = set(cmds.ls(long=True) or []) if session else set()
@@ -1366,7 +1490,7 @@ def clean_unknown_nodes():
     return "已删除 {} 个未知节点，移除 {} 个插件依赖，跳过 {} 项。插件依赖移除不可撤销。".format(deleted, removed, skipped)
 
 
-def execute(key):
+def execute(key, **options):
     tool = config.TOOLS.get(key)
     if tool is None:
         raise ToolError("未知工具：{}".format(key))
@@ -1385,10 +1509,14 @@ def execute(key):
         return run_skin_script(tool)
     if tool.kind == "gn":
         return run_gn(tool.path)
-    actions = {"rename_target": rename_target, "vray_skin": configure_vray_skin,
+    if tool.kind == "gn_manage":
+        from . import gn
+        return gn.status() if key == "gn_check" else gn.install()
+    actions = {"rename_target": mark_blend_source, "blend_target": blend_target,
+               "vray_skin": configure_vray_skin,
                "restore_xgen_guides": restore_xgen_guides,
                "clean_unknown_nodes": clean_unknown_nodes}
-    return actions[key]()
+    return actions[key](**options)
 
 '''
 
@@ -1460,7 +1588,7 @@ def apply(color="Original", resolution="2k", nodes=None):
         core._editable(node)
         if cmds.getAttr(node + ".fileTextureName", lock=True):
             raise core.ToolError("眼球贴图属性已锁定：" + node)
-        source = config.asset_path("Maya_Model/Eye_Arnold/sourceimages/" + relative)
+        source = config.asset_path("Models/Eye_Arnold/sourceimages/" + relative)
         if not os.path.isfile(source):
             raise core.ToolError("找不到眼球贴图：" + source)
         plan.append((node, source, original))
@@ -1491,6 +1619,224 @@ def import_eye(color="Original", resolution="2k"):
         result = apply(color, resolution, nodes)
         project.localize(session, nodes)
     return "已导入 Arnold 眼球。" + result
+
+'''
+
+_yj_sources['gn'] = r'''
+# -*- coding: utf-8 -*-
+"""GN Import/Export plugin discovery and installation; no UI creation."""
+import os
+import re
+import shutil
+
+from maya import cmds, mel
+
+from . import config
+
+PLUGIN_FOLDER = "Plugins"
+PLUGIN_PREFIX = "GN_ImportExport"
+USER_SETUP_LINE = 'evalDeferred("source \\"GN_ImportExport/GN_ImportExport.mel\\"; GN_ImportExport");'
+ZBRUSH_OPTION = "zbrush_root"
+_VERSION = re.compile(r"(\d+)")
+
+
+class GnError(RuntimeError):
+    """An actionable GN installation error to be displayed by the UI boundary."""
+
+
+def _version_key(name):
+    return [int(part) for part in _VERSION.findall(name)] or [0]
+
+
+def package_root():
+    """Newest Plugins/GN_ImportExport* folder that carries the Maya payload."""
+    try:
+        folder = config.asset_path(PLUGIN_FOLDER)
+    except ValueError as error:
+        raise GnError(str(error))
+    if not os.path.isdir(folder):
+        raise GnError("素材库中没有 {} 目录，请先把 GN 安装包放进去。".format(PLUGIN_FOLDER))
+    candidates = [name for name in os.listdir(folder)
+                  if name.startswith(PLUGIN_PREFIX) and
+                  os.path.isdir(os.path.join(folder, name, "Maya", "GN_ImportExport"))]
+    if not candidates:
+        raise GnError("在 {} 中找不到 GN 安装包（需要 {}*/Maya/GN_ImportExport）。".format(
+            folder, PLUGIN_PREFIX))
+    return os.path.join(folder, max(candidates, key=_version_key))
+
+
+def package_version(root):
+    match = _VERSION.findall(os.path.basename(root))
+    return ".".join(match) if match else "未知版本"
+
+
+def maya_scripts_dir():
+    """The folder GN_ImportExport.mel resolves its icons against."""
+    path = cmds.internalVar(userScriptDir=True)
+    if not path:
+        raise GnError("无法获取 Maya 用户脚本目录。")
+    return os.path.normpath(path)
+
+
+def zbrush_plugin_dirs():
+    """Configured ZPlugs64 folder, otherwise the standard install locations."""
+    configured = config.settings().get(ZBRUSH_OPTION, "")
+    if configured:
+        plugs = os.path.join(configured, "ZStartup", "ZPlugs64")
+        return [plugs] if os.path.isdir(plugs) else [configured] if os.path.isdir(configured) else []
+    found = []
+    for drive in ("C:", "D:", "E:", "F:"):
+        for program in ("Program Files", "Program Files (x86)"):
+            for vendor in ("Pixologic", "Maxon ZBrush", "Maxon"):
+                base = os.path.join(drive + os.sep, program, vendor)
+                if not os.path.isdir(base):
+                    continue
+                for name in sorted(os.listdir(base)):
+                    plugs = os.path.join(base, name, "ZStartup", "ZPlugs64")
+                    if os.path.isdir(plugs):
+                        found.append(plugs)
+    return found
+
+
+def _maya_installed(scripts_dir):
+    return os.path.isfile(os.path.join(scripts_dir, "GN_ImportExport", "GN_ImportExport.mel"))
+
+
+def _user_setup_ready(scripts_dir):
+    path = os.path.join(scripts_dir, "userSetup.mel")
+    if not os.path.isfile(path):
+        return False
+    with open(path, "r", encoding="utf-8-sig", errors="replace") as stream:
+        return "GN_ImportExport/GN_ImportExport.mel" in stream.read()
+
+
+def _commands_available():
+    try:
+        return bool(mel.eval('exists "GN_Import"')) and bool(mel.eval('exists "GN_Export"'))
+    except Exception:
+        return False
+
+
+def _zbrush_installed(plugs):
+    return (os.path.isfile(os.path.join(plugs, "GN_ImportExport.zsc")) and
+            os.path.isdir(os.path.join(plugs, "GN_ImportExport")))
+
+
+def status():
+    """Human readable report; never changes anything on disk."""
+    lines = []
+    try:
+        root = package_root()
+        lines.append("安装包：{}（v{}）".format(root, package_version(root)))
+    except GnError as error:
+        root = None
+        lines.append("安装包：未找到。{}".format(error))
+
+    scripts_dir = maya_scripts_dir()
+    installed = _maya_installed(scripts_dir)
+    lines.append("Maya 脚本目录：{}".format(scripts_dir))
+    lines.append("Maya 端 GN 文件：{}".format("已安装" if installed else "未安装"))
+    lines.append("userSetup.mel 自启动：{}".format(
+        "已配置" if _user_setup_ready(scripts_dir) else "未配置"))
+    lines.append("当前会话 GN 命令：{}".format(
+        "可用" if _commands_available() else "不可用（安装后需重启 Maya 或点击安装）"))
+
+    plugs = zbrush_plugin_dirs()
+    if not plugs:
+        lines.append("ZBrush：未找到 ZStartup/ZPlugs64；可在 Settings/toolbox.json 设置 "
+                     "zbrush_root 指向 ZBrush 安装目录。")
+    for path in plugs:
+        lines.append("ZBrush 插件目录：{}（{}）".format(
+            path, "已安装 GN" if _zbrush_installed(path) else "未安装 GN"))
+
+    ready = bool(root) and installed and _commands_available() and any(
+        _zbrush_installed(path) for path in plugs)
+    lines.append("结论：{}".format(
+        "GN 已就绪。" if ready else "尚未完全就绪，可点击“安装 GN 插件”。"))
+    return "\n".join(lines)
+
+
+def _copy_tree(source, destination):
+    """Recursive copy that overwrites GN's own files; Python 3.7 has no dirs_exist_ok."""
+    if not os.path.isdir(source):
+        raise GnError("安装包缺少目录：{}".format(source))
+    for current, _, files in os.walk(source):
+        target_dir = os.path.join(destination, os.path.relpath(current, source))
+        os.makedirs(target_dir, exist_ok=True)
+        for name in files:
+            shutil.copy2(os.path.join(current, name), os.path.join(target_dir, name))
+
+
+def _write_user_setup(scripts_dir):
+    path = os.path.join(scripts_dir, "userSetup.mel")
+    existing = ""
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as stream:
+            existing = stream.read()
+        if "GN_ImportExport/GN_ImportExport.mel" in existing:
+            return False
+        shutil.copy2(path, path + ".yuejun_backup")
+    text = existing.rstrip("\n")
+    text = (text + "\n\n" if text else "") + USER_SETUP_LINE + "\n"
+    with open(path, "w", encoding="utf-8", newline="\n") as stream:
+        stream.write(text)
+    return True
+
+
+def install():
+    """Copy the packaged plugin to Maya and ZBrush, then load it in this session."""
+    root = package_root()
+    scripts_dir = maya_scripts_dir()
+    os.makedirs(scripts_dir, exist_ok=True)
+    _copy_tree(os.path.join(root, "Maya", "GN_ImportExport"),
+               os.path.join(scripts_dir, "GN_ImportExport"))
+    report = ["已安装 Maya 端到 {}。".format(scripts_dir)]
+    report.append("已写入 userSetup.mel 自启动（原文件已备份）。" if _write_user_setup(scripts_dir)
+                  else "userSetup.mel 已有自启动配置，未重复写入。")
+
+    zbrush_source = os.path.join(root, "ZBrush")
+    plugs = zbrush_plugin_dirs()
+    if not os.path.isdir(zbrush_source):
+        report.append("安装包不含 ZBrush 端，已跳过。")
+    elif not plugs:
+        report.append("未找到 ZBrush 的 ZStartup/ZPlugs64，已跳过；请手动复制 {} 的内容。".format(
+            zbrush_source))
+    else:
+        done = []
+        for path in plugs:
+            try:
+                for name in os.listdir(zbrush_source):
+                    source = os.path.join(zbrush_source, name)
+                    target = os.path.join(path, name)
+                    if os.path.isdir(source):
+                        _copy_tree(source, target)
+                    else:
+                        shutil.copy2(source, target)
+                done.append(path)
+            except OSError as error:
+                report.append("ZBrush 端复制失败（{}）：{}。请以管理员身份重试。".format(path, error))
+        if done:
+            report.append("已安装 ZBrush 端到 {}。ZBrush 需重启后生效。".format("、".join(done)))
+
+    report.append(load())
+    return " ".join(report)
+
+
+def load():
+    """Source the installed MEL and rebuild the GN menu without restarting Maya."""
+    scripts_dir = maya_scripts_dir()
+    script = os.path.join(scripts_dir, "GN_ImportExport", "GN_ImportExport.mel")
+    if not os.path.isfile(script):
+        raise GnError("找不到已安装的 GN_ImportExport.mel，请先安装。")
+    if scripts_dir not in (os.environ.get("MAYA_SCRIPT_PATH") or ""):
+        os.environ["MAYA_SCRIPT_PATH"] = os.pathsep.join(
+            part for part in ((os.environ.get("MAYA_SCRIPT_PATH") or ""), scripts_dir) if part)
+    try:
+        mel.eval('source "{}";'.format(script.replace("\\", "/").replace('"', '\\"')))
+        mel.eval("GN_ImportExport;")
+    except RuntimeError as error:
+        raise GnError("GN 脚本加载失败：{}。请重启 Maya 后再试。".format(error))
+    return "GN 菜单已在当前会话载入。"
 
 '''
 
@@ -2036,7 +2382,7 @@ from functools import partial
 
 from maya import cmds, mel
 
-from . import config, core, project, eyes, preview
+from . import config, core, project, eyes, preview, gn
 
 WINDOW = "yuejunToolboxWindow"
 _instance = None
@@ -2053,10 +2399,11 @@ class ToolboxWindow(object):
         self.path_field = None
         self.status = None
         self.vray_mode = False
+        self.delete_blend_source = None
 
     def build(self):
         config.migrate_preferences()
-        window = cmds.window(WINDOW, title="Yuejun Toolbox 3.7.5",
+        window = cmds.window(WINDOW, title="Yuejun Toolbox 3.7.8",
                              widthHeight=(540, 770), sizeable=True)
         root = cmds.formLayout(parent=window)
         header = cmds.columnLayout(parent=root, adjustableColumn=True, rowSpacing=GAP)
@@ -2123,12 +2470,12 @@ class ToolboxWindow(object):
         frame = cmds.frameLayout(parent=parent, label=title, collapsable=not prominent,
                                  marginWidth=GAP, marginHeight=GAP)
         column = cmds.columnLayout(parent=frame, adjustableColumn=True, rowSpacing=GAP)
-        if title == "眼球" and not self.vray_mode:
+        if title == "素材" and not self.vray_mode:
             row = cmds.formLayout(parent=column, height=BUTTON_HEIGHT)
-            self.eye_color = cmds.optionMenu(parent=row, label="Arnold 颜色")
+            self.eye_color = cmds.optionMenu(parent=row, label="眼球颜色")
             for label, value in eyes.COLORS:
                 cmds.menuItem(parent=self.eye_color, label=label)
-            self.eye_resolution = cmds.optionMenu(parent=row, label="贴图精度")
+            self.eye_resolution = cmds.optionMenu(parent=row, label="眼球贴图精度")
             for value in eyes.RESOLUTIONS:
                 cmds.menuItem(parent=self.eye_resolution, label=value)
             cmds.optionMenu(self.eye_resolution, edit=True, value="2k")
@@ -2144,11 +2491,24 @@ class ToolboxWindow(object):
                 self.buttons[tool.key] = button
                 controls.append(button)
             self.equal_columns(row, controls, columns if len(tools) > columns else len(controls))
-        if title == "眼球" and not self.vray_mode:
-            cmds.button(parent=column, label="将设置应用到所选 Arnold 眼球", height=BUTTON_HEIGHT,
+        if title == "素材" and not self.vray_mode:
+            cmds.button(parent=column, label="将上方设置应用到所选 Arnold 眼球", height=BUTTON_HEIGHT,
                         command=self.apply_eye_settings)
-            cmds.text(parent=column, label="精度指贴图分辨率；共用材质的眼球会一起更新。", align="left", height=20)
+            cmds.text(parent=column, align="left", wordWrap=True, height=34,
+                      label="眼球设置只影响 Arnold 眼球，共用材质的眼球会一起更新。\n"
+                            "VFace 素材目录在 VFace 浏览器窗口里选择。")
+        if title == "目标与生长体":
+            self.delete_blend_source = cmds.checkBox(
+                parent=column, label="BS切换后删除新形状模型", value=True, height=22)
+            cmds.text(parent=column, align="left", wordWrap=True, height=34,
+                      label="BS 不再要求 MetaHuman 命名：同时选中新形状和被修改模型即可，\n"
+                            "或先用“BS先点我”标记新形状。两者拓扑必须完全一致。")
         return frame
+
+    def delete_source_enabled(self):
+        if self.delete_blend_source and cmds.checkBox(self.delete_blend_source, exists=True):
+            return bool(cmds.checkBox(self.delete_blend_source, query=True, value=True))
+        return True
 
     def eye_settings(self):
         color = dict(eyes.COLORS)[cmds.optionMenu(self.eye_color, query=True, value=True)]
@@ -2177,7 +2537,7 @@ class ToolboxWindow(object):
     def guarded(self, action):
         try:
             return action()
-        except (core.ToolError, project.ProjectError, ValueError, OSError) as error:
+        except (core.ToolError, project.ProjectError, gn.GnError, ValueError, OSError) as error:
             self.message(str(error), error=True)
         except Exception as error:
             _LOG.exception("Yuejun Toolbox operation failed")
@@ -2226,6 +2586,19 @@ class ToolboxWindow(object):
             return self.guarded(self.set_project)
         if key == "check_project":
             return self.guarded(self.check_project)
+        if key == "gn_check":
+            return self.guarded(self.check_gn)
+        if key == "gn_install":
+            if self.busy:
+                return
+            self.busy = True
+            try:
+                result = self.guarded(self.install_gn)
+                if result:
+                    self.message(result)
+            finally:
+                self.busy = False
+            return
         if config.TOOLS[key].kind == "legacy_mel":
             self.busy = True
             def schedule():
@@ -2241,6 +2614,8 @@ class ToolboxWindow(object):
                 cmds.refresh()
             if key == "import_eye_arnold":
                 action = lambda _: eyes.import_eye(*self.eye_settings())
+            elif key == "blend_target":
+                action = partial(core.execute, delete_source=self.delete_source_enabled())
             else:
                 action = self.open_preset if config.TOOLS[key].kind == "open" else core.execute
             result = self.guarded(partial(action, key))
@@ -2299,18 +2674,38 @@ class ToolboxWindow(object):
         else:
             self.message("当前项目：" + project.root_directory())
 
-    def check_project(self):
-        report = project.audit()
-        name = "yuejunProjectReport"
+    def report_window(self, name, title, report):
         if cmds.window(name, exists=True):
             cmds.deleteUI(name)
-        window = cmds.window(name, title="当前 Maya 项目检查", widthHeight=(780, 500))
+        window = cmds.window(name, title=title, widthHeight=(780, 500))
         layout = cmds.formLayout(parent=window)
         field = cmds.scrollField(parent=layout, text=report, editable=False, wordWrap=False)
         cmds.formLayout(layout, edit=True, attachForm=[(field, edge, 10) for edge in ("top", "left", "right", "bottom")])
         cmds.showWindow(window)
         print(report)
         return report
+
+    def check_project(self):
+        return self.report_window("yuejunProjectReport", "当前 Maya 项目检查", project.audit())
+
+    def check_gn(self):
+        return self.report_window("yuejunGnReport", "GN 插件安装检查", gn.status())
+
+    def install_gn(self):
+        root = gn.package_root()
+        targets = gn.zbrush_plugin_dirs()
+        message = "将安装 GN v{}：\n\nMaya：{}\nZBrush：{}\n\n会覆盖同名的 GN 文件，并在 userSetup.mel 追加自启动（原文件先备份）。".format(
+            gn.package_version(root), gn.maya_scripts_dir(),
+            "、".join(targets) if targets else "未找到，将跳过")
+        if cmds.confirmDialog(title="安装 GN 插件", message=message, button=["安装", "取消"],
+                              defaultButton="安装", cancelButton="取消",
+                              dismissString="取消") != "安装":
+            return "已取消安装。"
+        self.message("正在复制 GN 插件文件…")
+        cmds.refresh()
+        result = gn.install()
+        self.report_window("yuejunGnReport", "GN 插件安装检查", result + "\n\n" + gn.status())
+        return result
 
     def reload(self, *_):
         def reload_now():
@@ -2329,6 +2724,8 @@ def close():
     vface_ui.close()
     if cmds.window("yuejunProjectReport", exists=True):
         cmds.deleteUI("yuejunProjectReport")
+    if cmds.window("yuejunGnReport", exists=True):
+        cmds.deleteUI("yuejunGnReport")
 
 
 def show():
@@ -2358,9 +2755,9 @@ def _yj_launch(sources=_yj_sources, sys=_yj_sys, types=_yj_types):
     package = types.ModuleType(package_name)
     package.__path__ = []
     package.__package__ = package_name
-    package.__version__ = "3.7.5"
+    package.__version__ = "3.7.8"
     sys.modules[package_name] = package
-    for name in ("config", "preview", "project", "core", "eyes", "vface", "vface_ui", "notes_data", "notes", "ui"):
+    for name in ('config', 'preview', 'project', 'core', 'eyes', 'gn', 'vface', 'vface_ui', 'notes_data', 'notes', 'ui'):
         fullname = package_name + "." + name
         module = types.ModuleType(fullname)
         module.__package__ = package_name

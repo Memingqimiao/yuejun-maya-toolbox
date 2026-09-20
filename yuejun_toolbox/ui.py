@@ -5,7 +5,7 @@ from functools import partial
 
 from maya import cmds, mel
 
-from . import config, core, project, eyes, preview
+from . import config, core, project, eyes, preview, gn
 
 WINDOW = "yuejunToolboxWindow"
 _instance = None
@@ -22,10 +22,11 @@ class ToolboxWindow(object):
         self.path_field = None
         self.status = None
         self.vray_mode = False
+        self.delete_blend_source = None
 
     def build(self):
         config.migrate_preferences()
-        window = cmds.window(WINDOW, title="Yuejun Toolbox 3.7.5",
+        window = cmds.window(WINDOW, title="Yuejun Toolbox 3.7.8",
                              widthHeight=(540, 770), sizeable=True)
         root = cmds.formLayout(parent=window)
         header = cmds.columnLayout(parent=root, adjustableColumn=True, rowSpacing=GAP)
@@ -92,12 +93,12 @@ class ToolboxWindow(object):
         frame = cmds.frameLayout(parent=parent, label=title, collapsable=not prominent,
                                  marginWidth=GAP, marginHeight=GAP)
         column = cmds.columnLayout(parent=frame, adjustableColumn=True, rowSpacing=GAP)
-        if title == "眼球" and not self.vray_mode:
+        if title == "素材" and not self.vray_mode:
             row = cmds.formLayout(parent=column, height=BUTTON_HEIGHT)
-            self.eye_color = cmds.optionMenu(parent=row, label="Arnold 颜色")
+            self.eye_color = cmds.optionMenu(parent=row, label="眼球颜色")
             for label, value in eyes.COLORS:
                 cmds.menuItem(parent=self.eye_color, label=label)
-            self.eye_resolution = cmds.optionMenu(parent=row, label="贴图精度")
+            self.eye_resolution = cmds.optionMenu(parent=row, label="眼球贴图精度")
             for value in eyes.RESOLUTIONS:
                 cmds.menuItem(parent=self.eye_resolution, label=value)
             cmds.optionMenu(self.eye_resolution, edit=True, value="2k")
@@ -113,11 +114,24 @@ class ToolboxWindow(object):
                 self.buttons[tool.key] = button
                 controls.append(button)
             self.equal_columns(row, controls, columns if len(tools) > columns else len(controls))
-        if title == "眼球" and not self.vray_mode:
-            cmds.button(parent=column, label="将设置应用到所选 Arnold 眼球", height=BUTTON_HEIGHT,
+        if title == "素材" and not self.vray_mode:
+            cmds.button(parent=column, label="将上方设置应用到所选 Arnold 眼球", height=BUTTON_HEIGHT,
                         command=self.apply_eye_settings)
-            cmds.text(parent=column, label="精度指贴图分辨率；共用材质的眼球会一起更新。", align="left", height=20)
+            cmds.text(parent=column, align="left", wordWrap=True, height=34,
+                      label="眼球设置只影响 Arnold 眼球，共用材质的眼球会一起更新。\n"
+                            "VFace 素材目录在 VFace 浏览器窗口里选择。")
+        if title == "目标与生长体":
+            self.delete_blend_source = cmds.checkBox(
+                parent=column, label="BS切换后删除新形状模型", value=True, height=22)
+            cmds.text(parent=column, align="left", wordWrap=True, height=34,
+                      label="BS 不再要求 MetaHuman 命名：同时选中新形状和被修改模型即可，\n"
+                            "或先用“BS先点我”标记新形状。两者拓扑必须完全一致。")
         return frame
+
+    def delete_source_enabled(self):
+        if self.delete_blend_source and cmds.checkBox(self.delete_blend_source, exists=True):
+            return bool(cmds.checkBox(self.delete_blend_source, query=True, value=True))
+        return True
 
     def eye_settings(self):
         color = dict(eyes.COLORS)[cmds.optionMenu(self.eye_color, query=True, value=True)]
@@ -146,7 +160,7 @@ class ToolboxWindow(object):
     def guarded(self, action):
         try:
             return action()
-        except (core.ToolError, project.ProjectError, ValueError, OSError) as error:
+        except (core.ToolError, project.ProjectError, gn.GnError, ValueError, OSError) as error:
             self.message(str(error), error=True)
         except Exception as error:
             _LOG.exception("Yuejun Toolbox operation failed")
@@ -195,6 +209,19 @@ class ToolboxWindow(object):
             return self.guarded(self.set_project)
         if key == "check_project":
             return self.guarded(self.check_project)
+        if key == "gn_check":
+            return self.guarded(self.check_gn)
+        if key == "gn_install":
+            if self.busy:
+                return
+            self.busy = True
+            try:
+                result = self.guarded(self.install_gn)
+                if result:
+                    self.message(result)
+            finally:
+                self.busy = False
+            return
         if config.TOOLS[key].kind == "legacy_mel":
             self.busy = True
             def schedule():
@@ -210,6 +237,8 @@ class ToolboxWindow(object):
                 cmds.refresh()
             if key == "import_eye_arnold":
                 action = lambda _: eyes.import_eye(*self.eye_settings())
+            elif key == "blend_target":
+                action = partial(core.execute, delete_source=self.delete_source_enabled())
             else:
                 action = self.open_preset if config.TOOLS[key].kind == "open" else core.execute
             result = self.guarded(partial(action, key))
@@ -268,18 +297,38 @@ class ToolboxWindow(object):
         else:
             self.message("当前项目：" + project.root_directory())
 
-    def check_project(self):
-        report = project.audit()
-        name = "yuejunProjectReport"
+    def report_window(self, name, title, report):
         if cmds.window(name, exists=True):
             cmds.deleteUI(name)
-        window = cmds.window(name, title="当前 Maya 项目检查", widthHeight=(780, 500))
+        window = cmds.window(name, title=title, widthHeight=(780, 500))
         layout = cmds.formLayout(parent=window)
         field = cmds.scrollField(parent=layout, text=report, editable=False, wordWrap=False)
         cmds.formLayout(layout, edit=True, attachForm=[(field, edge, 10) for edge in ("top", "left", "right", "bottom")])
         cmds.showWindow(window)
         print(report)
         return report
+
+    def check_project(self):
+        return self.report_window("yuejunProjectReport", "当前 Maya 项目检查", project.audit())
+
+    def check_gn(self):
+        return self.report_window("yuejunGnReport", "GN 插件安装检查", gn.status())
+
+    def install_gn(self):
+        root = gn.package_root()
+        targets = gn.zbrush_plugin_dirs()
+        message = "将安装 GN v{}：\n\nMaya：{}\nZBrush：{}\n\n会覆盖同名的 GN 文件，并在 userSetup.mel 追加自启动（原文件先备份）。".format(
+            gn.package_version(root), gn.maya_scripts_dir(),
+            "、".join(targets) if targets else "未找到，将跳过")
+        if cmds.confirmDialog(title="安装 GN 插件", message=message, button=["安装", "取消"],
+                              defaultButton="安装", cancelButton="取消",
+                              dismissString="取消") != "安装":
+            return "已取消安装。"
+        self.message("正在复制 GN 插件文件…")
+        cmds.refresh()
+        result = gn.install()
+        self.report_window("yuejunGnReport", "GN 插件安装检查", result + "\n\n" + gn.status())
+        return result
 
     def reload(self, *_):
         def reload_now():
@@ -298,6 +347,8 @@ def close():
     vface_ui.close()
     if cmds.window("yuejunProjectReport", exists=True):
         cmds.deleteUI("yuejunProjectReport")
+    if cmds.window("yuejunGnReport", exists=True):
+        cmds.deleteUI("yuejunGnReport")
 
 
 def show():

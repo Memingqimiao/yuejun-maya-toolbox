@@ -10,14 +10,16 @@ from maya import cmds
 ROOT_OPTION = "yuejunToolbox_resourceRoot"
 DEFAULT_ROOT = "C:/Yuejun_ToolBox"
 OLD_DEFAULT_ROOT = "C:/Yunuo_Issue_01"
-# Legacy keys remain accepted so existing scenes and shelf scripts still resolve.
-PATH_MAPPINGS = (
-    ("Maya_shader_node/Arnold", "RenderPresets/Arnold"),
-    ("Maya_shader_node/Test_Vray.mb", "RenderPresets/VRay/Test_Vray.mb"),
-    ("Maya_shader_node", "NodePresets"),
-    ("Maya_Model", "Models"), ("Maya_Script", "Scripts"),
-    ("Maya_Texture", "Textures"), ("Maya_Light", "Lights"),
+# Tool paths use the current folder names. Older libraries that still carry the
+# pre-3.7.4 names are resolved through these pairs by asset_path.
+LEGACY_FOLDERS = (
+    ("RenderPresets/Arnold", "Maya_shader_node/Arnold"),
+    ("RenderPresets/VRay/Test_Vray.mb", "Maya_shader_node/Test_Vray.mb"),
+    ("NodePresets", "Maya_shader_node"),
+    ("Models", "Maya_Model"), ("Scripts", "Maya_Script"),
+    ("Textures", "Maya_Texture"), ("Lights", "Maya_Light"),
 )
+REQUIRED_FOLDERS = ("RenderPresets", "NodePresets", "Models", "Scripts", "Textures", "Lights")
 ROOT_MIGRATED_OPTION = "yuejunToolbox_rootMigrated31"
 Tool = namedtuple("Tool", "key label kind path help")
 PROJECT_GROUP = ("项目管理", (
@@ -30,33 +32,33 @@ GROUPS = (
     ("GN 快捷工具", (
         Tool("gn_import", "GN 导入", "gn", "GN_Import", "需要已安装 GN 插件；执行其原生导入流程。"),
         Tool("gn_export", "GN 导出", "gn", "GN_Export", "需要已安装 GN 插件；执行其原生导出流程。"),
+        Tool("gn_check", "检查 GN 安装", "gn_manage", "", "检查素材库安装包、Maya 端文件、userSetup 自启动及 ZBrush 端，显示详细报告；不修改任何文件。"),
+        Tool("gn_install", "安装 GN 插件", "gn_manage", "", "把素材库 Plugins 中的 GN 安装包复制到 Maya 用户脚本目录和 ZBrush 插件目录，写入自启动并在当前会话载入菜单。"),
     )),
     ("Skin", (
-        Tool("cut_uv", "Skin 切 UV", "mel", "Maya_Script/Skin_qieUV.mel", "仅适用于原配 Skin 拓扑；再次执行会再次偏移 UV。"),
-        Tool("restore_uv", "Skin 恢复 UV", "mel", "Maya_Script/Skin_huifuUV.mel", "原配模型的反向 UV 偏移及合并；不是通用 UV 备份恢复。"),
+        Tool("cut_uv", "Skin 切 UV", "mel", "Scripts/Skin_qieUV.mel", "仅适用于原配 Skin 拓扑；再次执行会再次偏移 UV。"),
+        Tool("restore_uv", "Skin 恢复 UV", "mel", "Scripts/Skin_huifuUV.mel", "原配模型的反向 UV 偏移及合并；不是通用 UV 备份恢复。"),
         Tool("vray_skin", "V-Ray 设置 · −0.5", "core", "", "需要已加载 V-Ray；在 Skin 网格上设置细分和置换属性。"),
     )),
     ("场景预设", (
-        Tool("preset_vray", "打开 V-Ray 预设", "open", "Maya_shader_node/Test_Vray.mb", "直接打开 V-Ray 预设文件，替换当前场景；有未保存修改时先提示。"),
-        Tool("preset_arnold", "打开 Arnold 预设", "open", "Maya_shader_node/Arnold/Base_Arnold.ma", "打开素材库中的 Arnold 预设；保留材质、灯光及渲染设置，有未保存修改时先提示。"),
+        Tool("preset_vray", "打开 V-Ray 预设", "open", "RenderPresets/VRay/Test_Vray.mb", "直接打开 V-Ray 预设文件，替换当前场景；有未保存修改时先提示。"),
+        Tool("preset_arnold", "打开 Arnold 预设", "open", "RenderPresets/Arnold/Base_Arnold.ma", "打开素材库中的 Arnold 预设；保留材质、灯光及渲染设置，有未保存修改时先提示。"),
     )),
-    ("VFace 素材", (
-        Tool("vface_browser", "选择 VFace 头部与贴图…", "ui", "", "打开 VFace 素材目录，切换配套 Arnold 预设的头部及贴图。"),
+    ("素材", (
+        Tool("import_eye", "导入 V-Ray 眼球", "import", "Models/VRay_eye.mb", "将 V-Ray 眼球和可用贴图同步到当前项目后导入。"),
+        Tool("import_eye_arnold", "导入 Arnold 眼球", "import", "Models/Eye_Arnold/Arnold_eye.ma", "将 Arnold 眼球及配套贴图同步到当前项目后导入；需要 Arnold 插件。"),
+        Tool("vface_browser", "VFace 头部与贴图…", "ui", "", "打开 VFace 素材浏览器，在其中选择素材目录并切换配套 Arnold 预设的头部及贴图。"),
     )),
     ("材质节点", (
-        Tool("disp", "Disp", "import", "Maya_shader_node/Disp.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
-        Tool("micro", "Micro", "import", "Maya_shader_node/Micro.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
-        Tool("disp_black", "Disp Black", "import", "Maya_shader_node/Disp_Black.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
-    )),
-    ("眼球", (
-        Tool("import_eye", "导入 V-Ray 眼球", "import", "Maya_Model/VRay_eye.mb", "将 V-Ray 眼球和可用贴图同步到当前项目后导入。"),
-        Tool("import_eye_arnold", "导入 Arnold 眼球", "import", "Maya_Model/Eye_Arnold/Arnold_eye.ma", "将 Arnold 眼球及配套贴图同步到当前项目后导入；需要 Arnold 插件。"),
+        Tool("disp", "Disp", "import", "NodePresets/Disp.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
+        Tool("micro", "Micro", "import", "NodePresets/Micro.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
+        Tool("disp_black", "Disp Black", "import", "NodePresets/Disp_Black.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
     )),
     ("目标与生长体", (
-        Tool("import_growth", "导入生长体", "legacy_import", "Maya_Model/Skin_shengzhangti.mb", "初版命令：直接导入生长体文件。"),
-        Tool("update_growth", "更新生长体", "legacy_mel", "Maya_Script/Skin_chuangjianshengzhangti.Mel", "初版 MEL：使用 Skin UV 对应更新生长体，并清除脚本指定对象的历史。"),
-        Tool("rename_target", "BS先点我", "core", "", "初版命令：将当前第一个选中对象重命名为 Mubiao。"),
-        Tool("blend_target", "BS切换", "legacy_mel", "Maya_Script/Skin_BSqiehuan.mel", "初版 MEL：创建并应用 BS，清除历史后删除 Mubiao。"),
+        Tool("import_growth", "导入生长体", "legacy_import", "Models/Skin_shengzhangti.mb", "初版命令：直接导入生长体文件。"),
+        Tool("update_growth", "更新生长体", "legacy_mel", "Scripts/Skin_chuangjianshengzhangti.Mel", "初版 MEL：使用 Skin UV 对应更新生长体，并清除脚本指定对象的历史。"),
+        Tool("rename_target", "BS先点我", "core", "", "选中新形状模型，记住它作为 BS 目标形状；不改名、不修改场景。"),
+        Tool("blend_target", "BS切换", "core", "", "把目标形状的造型传到被修改模型上并烘焙历史。同时选中两个模型（先新形状后被改模型）即可一步完成；只选一个则使用上一次标记的目标形状。要求两者拓扑完全一致。"),
     )),
     ("工具和帮助", (
         Tool("expression_notes", "XGen 表达式速查", "ui", "", "查看整理好的表达式、操作步骤并复制代码。"),
@@ -66,7 +68,7 @@ GROUPS = (
 )
 TOOLS = {tool.key: tool for _, group in GROUPS for tool in group}
 TOOLS.update({tool.key: tool for tool in PROJECT_GROUP[1]})
-GROUP_COLUMNS = {"材质节点": 3, "眼球": 2, "项目管理": 3}
+GROUP_COLUMNS = {"材质节点": 3, "素材": 2, "项目管理": 3}
 VRAY_TOOLS = {"vray_skin", "preset_vray", "import_eye", "disp", "micro", "disp_black"}
 ARNOLD_TOOLS = {"preset_arnold", "import_eye_arnold", "vface_browser"}
 
@@ -98,19 +100,16 @@ def set_resource_root(path):
     path = os.path.abspath(os.path.expanduser(path.strip()))
     if not os.path.isdir(path):
         raise ValueError("资源文件夹不存在：{}".format(path))
-    if not any(os.path.isdir(os.path.join(path, name)) for name in
-               ("Maya_Script", "Maya_Model", "Maya_shader_node", "Maya_Texture", "Maya_Light",
-                "RenderPresets", "NodePresets", "Models", "Scripts")):
-        raise ValueError("请选择包含 Maya_Script、Maya_Model 等子目录的资源根目录。")
+    accepted = REQUIRED_FOLDERS + tuple(legacy for _, legacy in LEGACY_FOLDERS if "/" not in legacy)
+    if not any(os.path.isdir(os.path.join(path, name)) for name in accepted):
+        raise ValueError("请选择包含 RenderPresets、NodePresets、Models 等子目录的资源根目录。")
     cmds.optionVar(stringValue=(ROOT_OPTION, path))
     return path
 
 
 def asset_path(relative):
     root = os.path.realpath(resource_root())
-    migrated = modern_path(relative)
-    if os.path.exists(os.path.join(root, migrated)) or not os.path.exists(os.path.join(root, relative)):
-        relative = migrated
+    relative = resolve_folder(root, relative)
     path = os.path.realpath(os.path.join(root, relative))
     if os.path.commonpath((root, path)) != root:
         raise ValueError("资源路径不能超出资源根目录。")
@@ -132,11 +131,25 @@ def asset_path(relative):
     return path
 
 
-def modern_path(relative):
+def resolve_folder(root, relative):
+    """Keep the current folder name; fall back to the pre-3.7.4 one if it is missing."""
     relative = relative.replace("\\", "/")
-    for old, new in PATH_MAPPINGS:
-        if relative == old or relative.startswith(old + "/"):
-            return new + relative[len(old):]
+    if os.path.exists(os.path.join(root, relative)):
+        return relative
+    for current, legacy in LEGACY_FOLDERS:
+        if relative == current or relative.startswith(current + "/"):
+            candidate = legacy + relative[len(current):]
+            if os.path.exists(os.path.join(root, candidate)):
+                return candidate
+    return relative
+
+
+def current_path(relative):
+    """Rewrite a pre-3.7.4 folder name to the current one, for naming inside projects."""
+    relative = relative.replace("\\", "/")
+    for current, legacy in LEGACY_FOLDERS:
+        if relative == legacy or relative.startswith(legacy + "/"):
+            return current + relative[len(legacy):]
     return relative
 
 

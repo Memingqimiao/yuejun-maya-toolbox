@@ -65,7 +65,7 @@ def apply(color="Original", resolution="2k", nodes=None):
         core._editable(node)
         if cmds.getAttr(node + ".fileTextureName", lock=True):
             raise core.ToolError("眼球贴图属性已锁定：" + node)
-        source = config.asset_path("Maya_Model/Eye_Arnold/sourceimages/" + relative)
+        source = config.asset_path("Models/Eye_Arnold/sourceimages/" + relative)
         if not os.path.isfile(source):
             raise core.ToolError("找不到眼球贴图：" + source)
         plan.append((node, source, original))

@@ -4,6 +4,7 @@ import ast
 import importlib
 import ntpath
 import os
+import shutil
 from pathlib import Path
 import sys
 import subprocess
@@ -24,7 +25,93 @@ api.OpenMaya = MagicMock(name="OpenMaya")
 sys.modules.update({"maya": maya, "maya.cmds": maya.cmds, "maya.mel": maya.mel,
                     "maya.api": api, "maya.api.OpenMaya": api.OpenMaya})
 
-from yuejun_toolbox import config, core, ui, project
+from yuejun_toolbox import config, core, ui, project, gn
+
+
+class GnInstallTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.package = self.root / "Plugins" / "GN_ImportExport_v2.73"
+        maya_payload = self.package / "Maya" / "GN_ImportExport"
+        (maya_payload / "GN_scripts").mkdir(parents=True)
+        (maya_payload / "GN_ImportExport.mel").write_text("// mel", encoding="utf-8")
+        (maya_payload / "GN_scripts" / "GN_Import.py").write_text("x = 1", encoding="utf-8")
+        zbrush = self.package / "ZBrush" / "GN_ImportExport"
+        zbrush.mkdir(parents=True)
+        (zbrush / "ZFileUtils64.dll").write_bytes(b"dll")
+        (self.package / "ZBrush" / "GN_ImportExport.zsc").write_bytes(b"zsc")
+        self.scripts = self.root / "maya" / "2022" / "scripts"
+        self.scripts.mkdir(parents=True)
+        self.plugs = self.root / "ZBrush" / "ZStartup" / "ZPlugs64"
+        self.plugs.mkdir(parents=True)
+        for target, kwargs in (("asset_path", {"side_effect": lambda rel: str(self.root / rel)}),
+                               ("settings", {"return_value": {}})):
+            patcher = patch.object(gn.config, target, **kwargs)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for target, kwargs in (("maya_scripts_dir", {"return_value": str(self.scripts)}),
+                               ("zbrush_plugin_dirs", {"return_value": [str(self.plugs)]})):
+            patcher = patch.object(gn, target, **kwargs)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_newest_versioned_package_is_selected(self):
+        # GN numbers its builds v2-73, so 73 is a revision of v2, not a decimal.
+        (self.root / "Plugins" / "GN_ImportExport_v2.9" / "Maya" / "GN_ImportExport").mkdir(parents=True)
+        self.assertEqual(os.path.basename(gn.package_root()), "GN_ImportExport_v2.73")
+        (self.root / "Plugins" / "GN_ImportExport_v3.0" / "Maya" / "GN_ImportExport").mkdir(parents=True)
+        self.assertEqual(os.path.basename(gn.package_root()), "GN_ImportExport_v3.0")
+        self.assertEqual(gn.package_version(gn.package_root()), "3.0")
+
+    def test_missing_package_reports_an_actionable_error(self):
+        shutil.rmtree(str(self.package))
+        with self.assertRaises(gn.GnError):
+            gn.package_root()
+
+    def test_install_copies_both_halves_and_writes_user_setup(self):
+        with patch.object(gn, "load", return_value="loaded"):
+            result = gn.install()
+        self.assertTrue((self.scripts / "GN_ImportExport" / "GN_ImportExport.mel").is_file())
+        self.assertTrue((self.scripts / "GN_ImportExport" / "GN_scripts" / "GN_Import.py").is_file())
+        self.assertTrue((self.plugs / "GN_ImportExport.zsc").is_file())
+        self.assertTrue((self.plugs / "GN_ImportExport" / "ZFileUtils64.dll").is_file())
+        setup = (self.scripts / "userSetup.mel").read_text(encoding="utf-8")
+        self.assertIn("GN_ImportExport/GN_ImportExport.mel", setup)
+        self.assertIn("loaded", result)
+
+    def test_existing_user_setup_is_backed_up_and_kept(self):
+        (self.scripts / "userSetup.mel").write_text('print "mine";\n', encoding="utf-8")
+        with patch.object(gn, "load", return_value="loaded"):
+            gn.install()
+        setup = (self.scripts / "userSetup.mel").read_text(encoding="utf-8")
+        self.assertIn('print "mine";', setup)
+        self.assertIn("GN_ImportExport/GN_ImportExport.mel", setup)
+        self.assertEqual((self.scripts / "userSetup.mel.yuejun_backup").read_text(encoding="utf-8"),
+                         'print "mine";\n')
+
+    def test_second_install_does_not_duplicate_the_startup_line(self):
+        with patch.object(gn, "load", return_value="loaded"):
+            gn.install()
+            gn.install()
+        setup = (self.scripts / "userSetup.mel").read_text(encoding="utf-8")
+        self.assertEqual(setup.count("GN_ImportExport/GN_ImportExport.mel"), 1)
+
+    def test_status_reports_missing_pieces_without_changing_disk(self):
+        with patch.object(gn, "_commands_available", return_value=False):
+            report = gn.status()
+        self.assertIn("未安装", report)
+        self.assertIn("尚未完全就绪", report)
+        self.assertFalse((self.scripts / "GN_ImportExport").exists())
+        self.assertFalse((self.scripts / "userSetup.mel").exists())
+
+    def test_gn_tools_are_registered_in_the_gn_group(self):
+        keys = [tool.key for title, tools in config.GROUPS if title.startswith("GN") for tool in tools]
+        self.assertEqual(keys, ["gn_import", "gn_export", "gn_check", "gn_install"])
+        self.assertTrue(core.availability(config.TOOLS["gn_install"])[0])
 
 
 class CopySafetyTests(unittest.TestCase):
@@ -142,21 +229,102 @@ class SceneSafetyTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def test_original_rename_uses_first_selection_and_reports_actual_name(self):
+    def test_blend_source_is_marked_without_touching_the_scene(self):
         commands = MagicMock()
-        commands.ls.return_value = ["First", "Second"]
-        commands.rename.return_value = "Mubiao1"
-        with patch.object(core, "cmds", commands):
-            result = core.rename_target()
-        commands.rename.assert_called_once_with("First", "Mubiao")
-        self.assertIn("Mubiao1", result)
+        commands.ls.side_effect = lambda *args, **kwargs: (
+            ["|NewShape"] if kwargs.get("selection") else ["abc-123"])
+        commands.nodeType.return_value = "transform"
+        commands.listRelatives.return_value = ["|NewShape|NewShapeShape"]
+        with patch.object(core, "cmds", commands), patch.object(
+                core, "mesh", return_value=("|NewShape", "|NewShape|NewShapeShape",
+                                            MagicMock(numVertices=10, numPolygons=4))):
+            result = core.mark_blend_source()
+        commands.rename.assert_not_called()
+        commands.blendShape.assert_not_called()
+        self.assertIn("NewShape", result)
+        self.assertEqual(core._BLEND_SOURCE["uuid"], "abc-123")
 
-    def test_original_rename_with_no_selection_is_noop(self):
+    def test_blend_requires_exactly_one_selected_mesh_to_mark(self):
         commands = MagicMock()
         commands.ls.return_value = []
         with patch.object(core, "cmds", commands):
-            self.assertEqual(core.rename_target(), "No objects selected.")
+            with self.assertRaises(core.ToolError):
+                core.mark_blend_source()
         commands.rename.assert_not_called()
+
+    def test_blend_target_refuses_mismatched_topology_before_changing_anything(self):
+        commands = MagicMock()
+        meshes = {"|Source": MagicMock(numVertices=10, numEdges=20, numPolygons=11),
+                  "|Base": MagicMock(numVertices=12, numEdges=24, numPolygons=13)}
+        with patch.object(core, "cmds", commands), patch.object(
+                core, "_selected_meshes", return_value=["|Source", "|Base"]), patch.object(
+                core, "mesh", side_effect=lambda node, editable=False: (node, node, meshes[node])):
+            with self.assertRaises(core.ToolError) as error:
+                core.blend_target()
+        self.assertIn("拓扑", str(error.exception))
+        commands.blendShape.assert_not_called()
+        commands.delete.assert_not_called()
+
+    def test_blend_target_works_on_any_matching_topology_without_metahuman_names(self):
+        commands = MagicMock()
+        commands.blendShape.return_value = ["blendShape7"]
+        commands.listHistory.return_value = []
+        shared = MagicMock(numVertices=10, numEdges=20, numPolygons=11)
+        with patch.object(core, "cmds", commands), patch.object(
+                core, "_selected_meshes", return_value=["|grp|Custom_New", "|grp|Custom_Base"]), patch.object(
+                core, "mesh", side_effect=lambda node, editable=False: (node, node, shared)), patch.object(
+                core, "undo_chunk", MagicMock()):
+            result = core.blend_target()
+        commands.blendShape.assert_called_once_with("|grp|Custom_New", "|grp|Custom_Base", weight=(0, 1.0))
+        commands.delete.assert_any_call("|grp|Custom_Base", constructionHistory=True)
+        commands.delete.assert_any_call("|grp|Custom_New")
+        self.assertIn("Custom_Base", result)
+
+    def test_blend_target_can_keep_the_source_mesh(self):
+        commands = MagicMock()
+        commands.blendShape.return_value = ["blendShape1"]
+        commands.listHistory.return_value = []
+        shared = MagicMock(numVertices=8, numEdges=12, numPolygons=6)
+        with patch.object(core, "cmds", commands), patch.object(
+                core, "_selected_meshes", return_value=["|A", "|B"]), patch.object(
+                core, "mesh", side_effect=lambda node, editable=False: (node, node, shared)), patch.object(
+                core, "undo_chunk", MagicMock()):
+            core.blend_target(delete_source=False)
+        commands.delete.assert_called_once_with("|B", constructionHistory=True)
+
+    def test_blend_target_reports_deformers_removed_by_history_cleanup(self):
+        commands = MagicMock()
+        commands.blendShape.return_value = ["blendShape1"]
+        commands.listHistory.return_value = ["skinCluster1", "tweak1"]
+        commands.nodeType.side_effect = lambda node: (
+            "skinCluster" if node.startswith("skinCluster") else "tweak")
+        shared = MagicMock(numVertices=8, numEdges=12, numPolygons=6)
+        with patch.object(core, "cmds", commands), patch.object(
+                core, "_selected_meshes", return_value=["|A", "|B"]), patch.object(
+                core, "mesh", side_effect=lambda node, editable=False: (node, node, shared)), patch.object(
+                core, "undo_chunk", MagicMock()):
+            result = core.blend_target()
+        self.assertIn("skinCluster", result)
+
+    def test_blend_target_refuses_the_same_mesh_twice(self):
+        commands = MagicMock()
+        shared = MagicMock(numVertices=8, numEdges=12, numPolygons=6)
+        with patch.object(core, "cmds", commands), patch.object(
+                core, "_selected_meshes", return_value=["|Same"]), patch.object(
+                core, "_marked_blend_source", return_value="|Same"), patch.object(
+                core, "mesh", side_effect=lambda node, editable=False: (node, node, shared)):
+            with self.assertRaises(core.ToolError):
+                core.blend_target()
+        commands.blendShape.assert_not_called()
+
+    def test_blend_target_without_a_marked_source_is_refused(self):
+        commands = MagicMock()
+        core._BLEND_SOURCE.update(uuid="", name="")
+        with patch.object(core, "cmds", commands), patch.object(
+                core, "_selected_meshes", return_value=["|Base"]):
+            with self.assertRaises(core.ToolError):
+                core.blend_target()
+        commands.blendShape.assert_not_called()
 
     def test_growth_import_keeps_original_file_command(self):
         commands = MagicMock()
@@ -167,11 +335,10 @@ class SceneSafetyTests(unittest.TestCase):
 
     def test_original_scripts_are_sourced_without_replacement_algorithm(self):
         commands, mel_commands = MagicMock(), MagicMock()
-        for key in ("blend_target",):
-            path = "C:/Resources/" + config.TOOLS[key].path
-            with patch.object(core, "cmds", commands), patch.object(core, "mel", mel_commands), patch.object(core, "require_file", return_value=path):
-                core.execute(key)
-            self.assertEqual(mel_commands.eval.call_args[0][0], 'source "{}";'.format(path))
+        path = "C:/Resources/Scripts/Skin_Legacy.mel"
+        with patch.object(core, "cmds", commands), patch.object(core, "mel", mel_commands), patch.object(core, "require_file", return_value=path):
+            core.run_legacy_mel("Scripts/Skin_Legacy.mel")
+        self.assertEqual(mel_commands.eval.call_args[0][0], 'source "{}";'.format(path))
         commands.blendShape.assert_not_called()
         commands.transferAttributes.assert_not_called()
 
@@ -337,6 +504,101 @@ class LegacyDataTests(unittest.TestCase):
                 chunk.assert_not_called()
 
 
+class DefaultProjectTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.library = self.root / "Library"
+        self.library.mkdir()
+        self.app = self.root / "maya"
+        (self.app / "projects").mkdir(parents=True)
+        commands = MagicMock()
+        commands.internalVar.return_value = str(self.app) + os.sep
+        for module, target, kwargs in ((project, "cmds", {"new": commands}),
+                                       (project.config, "resource_root",
+                                        {"return_value": str(self.library)}),
+                                       (project.config, "settings", {"return_value": {}})):
+            patcher = patch.object(module, target, **kwargs)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_default_project_lives_outside_the_resource_library(self):
+        root = project.default_project_root()
+        self.assertEqual(os.path.basename(root), "Yuejun_Default")
+        self.assertFalse(project.inside(root, str(self.library)))
+
+    def test_configured_location_is_honoured(self):
+        target = self.root / "Work" / "Preview"
+        with patch.object(project.config, "settings",
+                          return_value={"default_project_root": str(target)}):
+            self.assertEqual(project.normalize(project.default_project_root()),
+                             project.normalize(str(target)))
+
+    def test_configured_location_inside_the_library_is_refused(self):
+        with patch.object(project.config, "settings",
+                          return_value={"default_project_root": str(self.library / "Projects")}):
+            with self.assertRaises(project.ProjectError):
+                project.default_project_root()
+
+    def test_the_old_in_library_project_is_still_recognised(self):
+        roots = [project.normalize(path) for path in project.managed_roots()]
+        self.assertIn(project.normalize(str(self.library / "Projects" / "Default")), roots)
+
+
+class LibraryLayoutTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_tool_paths_use_the_current_folder_names(self):
+        for tool in config.TOOLS.values():
+            if tool.kind in ("mel", "import", "open", "legacy_import", "legacy_mel"):
+                head = tool.path.split("/")[0]
+                self.assertIn(head, config.REQUIRED_FOLDERS,
+                              "{} 仍使用旧目录名 {}".format(tool.key, tool.path))
+
+    def test_current_folder_is_used_when_present(self):
+        (self.root / "NodePresets").mkdir()
+        (self.root / "NodePresets" / "Disp.ma").write_text("x", encoding="utf-8")
+        self.assertEqual(config.resolve_folder(str(self.root), "NodePresets/Disp.ma"),
+                         "NodePresets/Disp.ma")
+
+    def test_legacy_folder_is_used_only_as_a_fallback(self):
+        (self.root / "Maya_shader_node" / "Arnold").mkdir(parents=True)
+        (self.root / "Maya_shader_node" / "Arnold" / "Base_Arnold.ma").write_text("x", encoding="utf-8")
+        self.assertEqual(config.resolve_folder(str(self.root), "RenderPresets/Arnold/Base_Arnold.ma"),
+                         "Maya_shader_node/Arnold/Base_Arnold.ma")
+        self.assertEqual(config.resolve_folder(str(self.root), "Models/VRay_eye.mb"),
+                         "Models/VRay_eye.mb")
+
+    def test_legacy_names_are_rewritten_for_project_layout(self):
+        self.assertEqual(config.current_path("Maya_Model/Eye_Arnold/a.ma"), "Models/Eye_Arnold/a.ma")
+        self.assertEqual(config.current_path("Maya_shader_node/Arnold/b.ma"), "RenderPresets/Arnold/b.ma")
+        self.assertEqual(config.current_path("Models/Eye_Arnold/a.ma"), "Models/Eye_Arnold/a.ma")
+
+    def test_assets_are_grouped_under_one_title(self):
+        titles = [title for title, _ in config.GROUPS]
+        self.assertIn("素材", titles)
+        self.assertNotIn("眼球", titles)
+        self.assertNotIn("VFace 素材", titles)
+        assets = dict(config.GROUPS)["素材"]
+        self.assertEqual([tool.key for tool in assets],
+                         ["import_eye", "import_eye_arnold", "vface_browser"])
+
+    def test_vface_path_is_only_offered_by_the_browser(self):
+        source = (Path(__file__).resolve().parents[1] / "yuejun_toolbox" / "ui.py").read_text(encoding="utf-8")
+        self.assertNotIn("vface_path_field", source)
+        self.assertNotIn("choose_vface_root", source)
+        browser = (Path(__file__).resolve().parents[1] / "yuejun_toolbox" / "vface_ui.py").read_text(encoding="utf-8")
+        self.assertIn("set_vface_root", browser)
+
+
 class ConfigurationAndUiTests(unittest.TestCase):
     def test_renderer_filters_and_project_button_order(self):
         arnold = {tool.key for _, group in config.visible_groups(False) for tool in group}
@@ -352,7 +614,7 @@ class ConfigurationAndUiTests(unittest.TestCase):
         old_window = ui.ToolboxWindow()
         old_window.busy = True
         with patch.object(ui, "_instance", ui.ToolboxWindow()), patch.object(core, "execute") as execute:
-            old_window.run_deferred_legacy("blend_target")
+            old_window.run_deferred_legacy("update_growth")
         execute.assert_not_called()
         self.assertFalse(old_window.busy)
 
@@ -419,7 +681,7 @@ class ConfigurationAndUiTests(unittest.TestCase):
         events = []
         with patch.object(ui, "close", side_effect=lambda: events.append("close")), patch.object(ui, "show", side_effect=lambda: events.append("show")), patch.object(importlib, "reload", side_effect=lambda module: events.append(module.__name__)):
             yuejun_toolbox.reload_toolbox()
-        self.assertEqual(events, ["close", "yuejun_toolbox.config", "yuejun_toolbox.preview", "yuejun_toolbox.project", "yuejun_toolbox.core", "yuejun_toolbox.eyes", "yuejun_toolbox.vface", "yuejun_toolbox.vface_ui", "yuejun_toolbox.notes_data", "yuejun_toolbox.notes", "yuejun_toolbox.ui", "show"])
+        self.assertEqual(events, ["close", "yuejun_toolbox.config", "yuejun_toolbox.preview", "yuejun_toolbox.project", "yuejun_toolbox.core", "yuejun_toolbox.eyes", "yuejun_toolbox.gn", "yuejun_toolbox.vface", "yuejun_toolbox.vface_ui", "yuejun_toolbox.notes_data", "yuejun_toolbox.notes", "yuejun_toolbox.ui", "show"])
 
     def test_python37_grammar(self):
         if sys.version_info < (3, 8):
@@ -429,83 +691,6 @@ class ConfigurationAndUiTests(unittest.TestCase):
         for path in files:
             with self.subTest(path=path.name):
                 ast.parse(path.read_text(encoding="utf-8"), filename=str(path), feature_version=(3, 7))
-
-
-class VFaceLibraryTests(unittest.TestCase):
-    def test_settings_live_under_selected_library(self):
-        with tempfile.TemporaryDirectory() as root, patch.object(config, "resource_root", return_value=root):
-            config.set_setting("vface_root", "F:/VFace")
-            config.set_setting("another_setting", 1)
-            self.assertEqual(config.vface_root(), "F:/VFace")
-            self.assertEqual(config.settings()["another_setting"], 1)
-            self.assertTrue((Path(root) / "Settings" / "toolbox.json").is_file())
-
-    def test_legacy_asset_keys_resolve_reorganized_library(self):
-        with tempfile.TemporaryDirectory() as root, patch.object(config, "resource_root", return_value=root):
-            scene = Path(root) / "RenderPresets" / "Arnold" / "Base_Arnold.ma"
-            scene.parent.mkdir(parents=True)
-            scene.write_text("test")
-            self.assertEqual(config.asset_path("Maya_shader_node/Arnold/Base_Arnold.ma"), str(scene))
-
-    def test_package_sync_migrates_hash_paths_and_reuses_readable_copy(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder) / "project"
-            library = Path(folder) / "library"
-            source = Path(folder) / "pack" / "115" / "01_head" / "maps" / "albedo.exr"
-            source.parent.mkdir(parents=True)
-            source.write_bytes(b"source")
-            with patch.object(project, "require_project", return_value=str(root)), patch.object(config, "resource_root", return_value=str(library)), patch.object(project, "rule_directory", side_effect=lambda root, rule, default: os.path.join(root, default)):
-                session = project.SyncSession()
-                session.register_package(str(source.parents[2]), "VFace/115")
-                old = root / "sourceimages/Yuejun/External/30a864f091ef/albedo.exr"
-                old.parent.mkdir(parents=True)
-                old.write_bytes(b"old artist file")
-                key = project.normalize(str(source)) + "|texture"
-                session.index[key] = {"target": session.relative(str(old))}
-                mapped = session.resource(str(source))
-                self.assertIn("VFace/115/01_head/maps", mapped)
-                self.assertEqual(session.copied, 1)
-                self.assertEqual(session.resource(str(source)), mapped)
-                self.assertEqual(session.copied, 1)
-                self.assertEqual(old.read_bytes(), b"old artist file")
-
-    def test_readable_revision_preserves_artist_edits(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            source = root / "asset.exr"
-            source.write_bytes(b"new")
-            first = root / "versions" / "Revision_001"
-            first.mkdir(parents=True)
-            (first / source.name).write_bytes(b"artist")
-            self.assertEqual(project.revision_folder(str(root), [str(source)]), str(root / "versions/Revision_002"))
-            (first / source.name).write_bytes(b"new")
-            self.assertEqual(project.revision_folder(str(root), [str(source)]), str(first))
-
-    def test_discovery_lists_complete_sets_and_accepts_one_identity(self):
-        from yuejun_toolbox import vface
-        with tempfile.TemporaryDirectory() as root:
-            complete = Path(root) / "115"
-            for relative in vface.FILES.values():
-                path = complete / "01_head" / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(b"test")
-            (Path(root) / "116" / "01_head").mkdir(parents=True)
-            self.assertEqual(vface.discover(root), [("115", str(complete))])
-            self.assertEqual(vface.discover(str(complete)), [("115", str(complete))])
-
-    def test_missing_calibrated_map_never_edits_scene(self):
-        from yuejun_toolbox import vface
-        with tempfile.TemporaryDirectory() as root, patch.object(vface, "cmds") as commands:
-            with self.assertRaisesRegex(core.ToolError, "dispCalibrated"):
-                vface.apply(root)
-            commands.assert_not_called()
-            self.assertEqual(commands.mock_calls, [])
-
-    def test_vface_is_hidden_in_vray_mode(self):
-        arnold = {tool.key for _, group in config.visible_groups(False) for tool in group}
-        vray = {tool.key for _, group in config.visible_groups(True) for tool in group}
-        self.assertIn("vface_browser", arnold)
-        self.assertNotIn("vface_browser", vray)
 
 
 if __name__ == "__main__":

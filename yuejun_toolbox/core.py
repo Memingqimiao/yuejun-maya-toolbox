@@ -107,13 +107,96 @@ def named_mesh(name, editable=False):
     return mesh(next(iter(candidates)), editable=editable)
 
 
-def rename_target():
-    """Original BS preparation command: rename the first selected object."""
-    selected = cmds.ls(selection=True)
-    if selected:
-        actual = cmds.rename(selected[0], "Mubiao")
-        return "Successfully renamed the model to {}.".format(actual)
-    return "No objects selected."
+_BLEND_SOURCE = {"uuid": "", "name": ""}
+
+
+def _short(node):
+    return node.rsplit("|", 1)[-1]
+
+
+def _topology(mesh_fn):
+    return mesh_fn.numVertices, mesh_fn.numEdges, mesh_fn.numPolygons
+
+
+def _selected_meshes():
+    """Selected mesh transforms in pick order, without duplicates."""
+    result = []
+    for node in cmds.ls(selection=True, long=True, objectsOnly=True) or []:
+        if node not in result and (
+                cmds.nodeType(node) == "mesh" or
+                cmds.listRelatives(node, shapes=True, noIntermediate=True, type="mesh")):
+            result.append(node)
+    return result
+
+
+def mark_blend_source():
+    """Remember the selected mesh as the BS source shape; the scene is not changed."""
+    selected = _selected_meshes()
+    if len(selected) != 1:
+        raise ToolError("请只选中一个新形状模型，当前选中 {} 个网格。".format(len(selected)))
+    node, _, mesh_fn = mesh(selected[0])
+    # UUIDs survive renaming and reparenting, unlike the original fixed Mubiao name.
+    _BLEND_SOURCE["uuid"] = (cmds.ls(node, uuid=True) or [""])[0]
+    _BLEND_SOURCE["name"] = _short(node)
+    return "已记住目标形状：{}（{} 点 / {} 面）。再选中要被修改的模型，点击 BS切换。".format(
+        _short(node), mesh_fn.numVertices, mesh_fn.numPolygons)
+
+
+def _marked_blend_source():
+    if not _BLEND_SOURCE["uuid"]:
+        raise ToolError("尚未标记目标形状。请先选中新形状模型点击“BS先点我”，或同时选中两个模型再点击本按钮。")
+    matches = cmds.ls(_BLEND_SOURCE["uuid"], long=True) or []
+    if len(matches) != 1:
+        raise ToolError("标记的目标形状 {} 已不在场景中，请重新点击“BS先点我”。".format(
+            _BLEND_SOURCE["name"] or "模型"))
+    return matches[0]
+
+
+def blend_target(delete_source=True):
+    """Transfer a shape between any two meshes that share the same topology.
+
+    The original MEL required MetaHuman naming: it blended a node called Mubiao
+    onto a node called Skin. Both meshes now come from the selection instead.
+    """
+    selected = _selected_meshes()
+    if len(selected) > 2:
+        raise ToolError("最多选中两个模型（先新形状、后被修改模型），当前选中 {} 个。".format(len(selected)))
+    if len(selected) == 2:
+        source_node, base_node = selected
+    elif len(selected) == 1:
+        source_node, base_node = _marked_blend_source(), selected[0]
+    else:
+        raise ToolError("请选中要被修改的模型；或同时选中新形状和被修改模型。")
+
+    source, _, source_fn = mesh(source_node, editable=delete_source)
+    base, _, base_fn = mesh(base_node, editable=True)
+    if source == base:
+        raise ToolError("新形状和被修改模型不能是同一个：{}。".format(_short(base)))
+    if _topology(source_fn) != _topology(base_fn):
+        raise ToolError(
+            "两个模型拓扑不一致，无法传递形状。{}：{} 点 / {} 边 / {} 面；{}：{} 点 / {} 边 / {} 面。"
+            "请使用点、边、面数量完全相同的模型。".format(
+                _short(source), *(_topology(source_fn) + (_short(base),) + _topology(base_fn))))
+
+    # The original MEL ran delete -ch too; name the deformers it will take with it.
+    existing = [node for node in set(cmds.listHistory(base, pruneDagObjects=True) or [])
+                if cmds.nodeType(node) in ("skinCluster", "blendShape", "cluster", "lattice",
+                                           "wrap", "deltaMush", "nonLinear", "ffd")]
+    with undo_chunk("blend_target"):
+        deformer = cmds.blendShape(source, base, weight=(0, 1.0))[0]
+        cmds.setAttr(deformer + ".envelope", 1)
+        cmds.delete(base, constructionHistory=True)
+        if delete_source:
+            cmds.delete(source)
+        cmds.select(base, replace=True)
+    if delete_source and _BLEND_SOURCE["uuid"] and not cmds.ls(_BLEND_SOURCE["uuid"]):
+        _BLEND_SOURCE.update(uuid="", name="")
+    return "已将 {} 的造型传给 {} 并清除历史{}（可撤销）。{}".format(
+        _short(source), _short(base),
+        "，已删除新形状模型" if delete_source else "，保留新形状模型",
+        "注意：清除历史同时移除了 {} 上原有的 {}。".format(
+            _short(base), "、".join(sorted({cmds.nodeType(node) for node in existing})))
+        if existing else "")
 
 
 def run_legacy_mel(relative):
@@ -372,7 +455,7 @@ def run_gn(procedure):
     if procedure not in ("GN_Import", "GN_Export"):
         raise ToolError("未知 GN 命令。")
     if not mel.eval('exists "{}"'.format(procedure)):
-        raise ToolError("找不到 {}，请先安装 GN 并将其脚本加入 Maya 路径。".format(procedure))
+        raise ToolError("找不到 {}。请先点击“检查 GN 安装”确认状态，或点击“安装 GN 插件”。".format(procedure))
     # GN owns its file dialogs, scene edits and undo behavior.
     session = project.SyncSession() if procedure == "GN_Import" else None
     before = set(cmds.ls(long=True) or []) if session else set()
@@ -512,7 +595,7 @@ def clean_unknown_nodes():
     return "已删除 {} 个未知节点，移除 {} 个插件依赖，跳过 {} 项。插件依赖移除不可撤销。".format(deleted, removed, skipped)
 
 
-def execute(key):
+def execute(key, **options):
     tool = config.TOOLS.get(key)
     if tool is None:
         raise ToolError("未知工具：{}".format(key))
@@ -531,7 +614,11 @@ def execute(key):
         return run_skin_script(tool)
     if tool.kind == "gn":
         return run_gn(tool.path)
-    actions = {"rename_target": rename_target, "vray_skin": configure_vray_skin,
+    if tool.kind == "gn_manage":
+        from . import gn
+        return gn.status() if key == "gn_check" else gn.install()
+    actions = {"rename_target": mark_blend_source, "blend_target": blend_target,
+               "vray_skin": configure_vray_skin,
                "restore_xgen_guides": restore_xgen_guides,
                "clean_unknown_nodes": clean_unknown_nodes}
-    return actions[key]()
+    return actions[key](**options)

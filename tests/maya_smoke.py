@@ -38,24 +38,47 @@ def main():
             cmds.workspace(os.environ["MAYA_APP_DIR"], openWorkspace=True)
             self.project_temp.cleanup()
 
-        def test_original_bs_renames_first_target_and_runs_original_mel(self):
-            resource_root = os.environ.get("YUEJUN_TEST_ASSET_ROOT", "C:/Yuejun_ToolBox")
-            if not os.path.isfile(os.path.join(resource_root, "Maya_Script/Skin_BSqiehuan.mel")):
-                self.skipTest("Original BS script unavailable")
-            cmds.polyCube(name="Skin")
-            cmds.polyCube(name="NewTarget")
-            cmds.select("NewTarget", replace=True)
-            core.execute("rename_target")
-            self.assertTrue(cmds.objExists("Mubiao"))
-            with patch.object(config, "resource_root", return_value=resource_root):
-                core.execute("blend_target")
-            self.assertTrue(cmds.objExists("Skin"))
-            self.assertFalse(cmds.objExists("Mubiao"))
+        def test_bs_transfers_shape_between_any_meshes_with_matching_topology(self):
+            # Deliberately non-MetaHuman names: the old MEL required Skin and Mubiao.
+            base = cmds.polyCube(name="Prop_Base")[0]
+            source = cmds.polyCube(name="Prop_New")[0]
+            cmds.move(0, 2, 0, source + ".vtx[0:7]", relative=True)
+            expected = cmds.xform(source + ".vtx[0]", query=True, worldSpace=True, translation=True)
+            cmds.select([source, base], replace=True)
+            core.execute("blend_target")
+            self.assertTrue(cmds.objExists(base))
+            self.assertFalse(cmds.objExists(source))
             self.assertFalse(cmds.ls(type="blendShape"))
+            moved = cmds.xform(base + ".vtx[0]", query=True, worldSpace=True, translation=True)
+            for actual, wanted in zip(moved, expected):
+                self.assertAlmostEqual(actual, wanted, places=4)
+            cmds.undo()
+            self.assertTrue(cmds.objExists(source))
+
+        def test_bs_marks_source_first_and_keeps_it_when_requested(self):
+            base = cmds.polyCube(name="Prop_Base")[0]
+            source = cmds.polyCube(name="Prop_New")[0]
+            cmds.move(0, 1, 0, source + ".vtx[0:7]", relative=True)
+            cmds.select(source, replace=True)
+            core.execute("rename_target")
+            self.assertTrue(cmds.objExists(source))
+            cmds.select(base, replace=True)
+            core.execute("blend_target", delete_source=False)
+            self.assertTrue(cmds.objExists(source))
+            self.assertFalse(cmds.ls(type="blendShape"))
+
+        def test_bs_refuses_different_topology_without_changing_the_scene(self):
+            base = cmds.polyCube(name="Prop_Base")[0]
+            source = cmds.polySphere(name="Prop_New")[0]
+            cmds.select([source, base], replace=True)
+            with self.assertRaises(core.ToolError):
+                core.execute("blend_target")
+            self.assertFalse(cmds.ls(type="blendShape"))
+            self.assertTrue(cmds.objExists(source))
 
         def test_original_growth_file_command_imports_without_added_prefix(self):
             with tempfile.TemporaryDirectory() as folder:
-                model_folder = os.path.join(folder, "Maya_Model")
+                model_folder = os.path.join(folder, "Models")
                 os.makedirs(model_folder)
                 asset = os.path.join(model_folder, "Skin_shengzhangti.mb")
                 cmds.polyPlane(name="Hair_Grtuv")
@@ -80,7 +103,7 @@ def main():
 
         def test_original_growth_update_uses_original_uv_script(self):
             resource_root = os.environ.get("YUEJUN_TEST_ASSET_ROOT", "C:/Yuejun_ToolBox")
-            if not os.path.isfile(os.path.join(resource_root, "Maya_Script/Skin_chuangjianshengzhangti.Mel")):
+            if not os.path.isfile(os.path.join(resource_root, "Scripts/Skin_chuangjianshengzhangti.Mel")):
                 self.skipTest("Original update script unavailable")
             cmds.polyPlane(name="Skin")
             names = ("Hair_Grtuv", "Brow_Grtuv", "Lash_Grtuv", "Beard_Grtuv")

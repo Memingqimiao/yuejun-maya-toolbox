@@ -35,6 +35,35 @@ def rule_directory(root, rule, default):
     return path
 
 
+def default_project_root():
+    """Reusable preview workspace, deliberately kept outside the resource library."""
+    configured = config.settings().get("default_project_root", "")
+    if configured:
+        root = os.path.realpath(os.path.expanduser(configured))
+    else:
+        root = os.path.realpath(os.path.join(cmds.internalVar(userAppDir=True),
+                                             "projects", "Yuejun_Default"))
+    library = os.path.realpath(config.resource_root())
+    if inside(root, library) or inside(library, root):
+        raise ProjectError("默认工程不能放在素材库内部。请修改 Settings/toolbox.json 中的 "
+                           "default_project_root。")
+    return root
+
+
+def managed_roots():
+    """The default workspace, plus the pre-3.7.8 one inside the library."""
+    roots = []
+    try:
+        roots.append(default_project_root())
+    except ProjectError:
+        pass
+    try:
+        roots.append(os.path.realpath(os.path.join(config.resource_root(), "Projects", "Default")))
+    except Exception:
+        pass
+    return roots
+
+
 def require_project():
     root = root_directory()
     if not os.path.isfile(os.path.join(root, "workspace.mel")):
@@ -43,7 +72,7 @@ def require_project():
     if os.path.normcase(root) == os.path.normcase(default):
         raise ProjectError("当前是 Maya 默认项目。请先在项目窗口创建自己的工作项目。")
     library = os.path.realpath(config.resource_root())
-    managed = normalize(root) == normalize(os.path.join(library, "Projects", "Default"))
+    managed = any(normalize(root) == normalize(candidate) for candidate in managed_roots())
     if (inside(root, library) or inside(library, root)) and not managed:
         raise ProjectError("工作项目和素材库不能相同或互相包含，请设置独立的项目目录。")
     for rule, fallback in (("scene", "scenes"), ("sourceImages", "sourceimages"),
@@ -53,15 +82,12 @@ def require_project():
 
 
 def ensure_project():
-    """Use the user's valid project or one reusable, isolated library workspace."""
+    """Use the user's valid project or one reusable workspace outside the library."""
     try:
         return require_project()
     except ProjectError:
         pass
-    library = os.path.realpath(config.resource_root())
-    root = os.path.realpath(os.path.join(library, "Projects", "Default"))
-    if not inside(root, library) or root == library:
-        raise ProjectError("默认项目目录指向素材库之外，请检查 Projects 目录。")
+    root = default_project_root()
     os.makedirs(root, exist_ok=True)
     workspace = os.path.join(root, "workspace.mel")
     rules = (("scene", "scenes"), ("sourceImages", "sourceimages"), ("images", "images"),
@@ -155,7 +181,7 @@ class SyncSession(object):
         if package:
             relative = os.path.join(package[1], os.path.relpath(source, package[0]))
         elif inside(source, self.library):
-            relative = config.modern_path(os.path.relpath(source, self.library)).replace("/", os.sep)
+            relative = config.current_path(os.path.relpath(source, self.library)).replace("/", os.sep)
             # Keep one recognizable Arnold directory under each Maya file rule.
             arnold = os.path.join("RenderPresets", "Arnold") + os.sep
             if relative.startswith(arnold):
@@ -273,7 +299,8 @@ class SyncSession(object):
                        "Textures", "Lights", "Models", "RenderPresets", "NodePresets"):
             match = re.search(r"(?:^|/)" + marker + r"/(.*)$", raw, re.I)
             if match:
-                candidates.insert(0, os.path.join(self.library, config.modern_path(marker + "/" + match.group(1))))
+                candidates.insert(0, os.path.join(self.library, config.resolve_folder(
+                    self.library, config.current_path(marker + "/" + match.group(1)))))
         for path in candidates:
             if pattern_files(path):
                 return os.path.normpath(path)
@@ -559,7 +586,8 @@ def audit():
             issues.append("项目外快照目录：" + match.group(1))
     unknown = cmds.ls(type="unknown") or []
     if unknown:
-        issues.append("存在未知节点，其资源无法完整检查：" + "、".join(unknown))
+        issues.append("存在未知节点，其资源无法完整检查：" + "、".join(unknown) +
+                      "。可用“工具和帮助 → 清理无效节点”移除。")
     return "当前项目：{}\n检查了 {} 个资源路径。\n{}".format(
         root, len(paths), "\n".join(issues) if issues else "检查通过：已检查的资源均位于项目内且存在。") + \
         "\n\n检查范围：Maya 文件路径编辑器注册资源、常用贴图 / 缓存 / 音频、场景引用和 RenderView 快照。未注册插件的私有路径可能需要插件自身检查。"
