@@ -35,11 +35,6 @@ GROUPS = (
         Tool("gn_check", "检查 GN 安装", "gn_manage", "", "检查素材库安装包、Maya 端文件、userSetup 自启动及 ZBrush 端，显示详细报告；不修改任何文件。"),
         Tool("gn_install", "安装 GN 插件", "gn_manage", "", "把素材库 Plugins 中的 GN 安装包复制到 Maya 用户脚本目录和 ZBrush 插件目录，写入自启动并在当前会话载入菜单。"),
     )),
-    ("Skin", (
-        Tool("cut_uv", "Skin 切 UV", "mel", "Scripts/Skin_qieUV.mel", "仅适用于原配 Skin 拓扑；再次执行会再次偏移 UV。"),
-        Tool("restore_uv", "Skin 恢复 UV", "mel", "Scripts/Skin_huifuUV.mel", "原配模型的反向 UV 偏移及合并；不是通用 UV 备份恢复。"),
-        Tool("vray_skin", "V-Ray 设置 · −0.5", "core", "", "需要已加载 V-Ray；在 Skin 网格上设置细分和置换属性。"),
-    )),
     ("场景预设", (
         Tool("preset_vray", "打开 V-Ray 预设", "open", "RenderPresets/VRay/Test_Vray.mb", "直接打开 V-Ray 预设文件，替换当前场景；有未保存修改时先提示。"),
         Tool("preset_arnold", "打开 Arnold 预设", "open", "RenderPresets/Arnold/Base_Arnold.ma", "打开素材库中的 Arnold 预设；保留材质、灯光及渲染设置，有未保存修改时先提示。"),
@@ -48,6 +43,11 @@ GROUPS = (
         Tool("import_eye", "导入 V-Ray 眼球", "import", "Models/VRay_eye.mb", "将 V-Ray 眼球和可用贴图同步到当前项目后导入。"),
         Tool("import_eye_arnold", "导入 Arnold 眼球", "import", "Models/Eye_Arnold/Arnold_eye.ma", "将 Arnold 眼球及配套贴图同步到当前项目后导入；需要 Arnold 插件。"),
         Tool("vface_browser", "VFace 头部与贴图…", "ui", "", "打开 VFace 素材浏览器，在其中选择素材目录并切换配套 Arnold 预设的头部及贴图。"),
+        Tool("mh_female", "导入 MetaHuman 女", "mh_import", "Models/Metahuman/Model/MH_Base_Female.fbx", "导入女性基础模型，保留原材质与 UV。"),
+        Tool("mh_male", "导入 MetaHuman 男", "mh_import", "Models/Metahuman/Model/MH_Base_Male.fbx", "导入男性基础模型，保留原材质与 UV。"),
+        Tool("mh_apply", "观察贴图 / 还原", "mh", "", "选中 MetaHuman 组或子网格，点击应用观察贴图，再次点击还原原材质。"),
+        Tool("mh_uv", "MH切UV / 恢复UV", "mh", "", "选择符合配套 MetaHuman 拓扑的头部；首次切 UV，再次精确还原，不要求名称。"),
+        Tool("mh_seams", "修复头身接缝", "mh", "", "同时选中头部和身体，平均重合边界点法线；不移动顶点、不焊接，可撤销。"),
     )),
     ("材质节点", (
         Tool("disp", "Disp", "import", "NodePresets/Disp.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
@@ -56,7 +56,7 @@ GROUPS = (
     )),
     ("目标与生长体", (
         Tool("import_growth", "导入生长体", "legacy_import", "Models/Skin_shengzhangti.mb", "初版命令：直接导入生长体文件。"),
-        Tool("update_growth", "更新生长体", "legacy_mel", "Scripts/Skin_chuangjianshengzhangti.Mel", "初版 MEL：使用 Skin UV 对应更新生长体，并清除脚本指定对象的历史。"),
+        Tool("update_growth", "更新生长体", "core", "", "选中头部网格按 map1 UV 更新配套生长体；来源名称不限，保留来源历史，生长体结果烘焙。"),
         Tool("rename_target", "BS先点我", "core", "", "选中新形状模型，记住它作为 BS 目标形状；不改名、不修改场景。"),
         Tool("blend_target", "BS切换", "core", "", "把目标形状的造型传到被修改模型上并烘焙历史。同时选中两个模型（先新形状后被改模型）即可一步完成；只选一个则使用上一次标记的目标形状。要求两者拓扑完全一致。"),
     )),
@@ -69,7 +69,7 @@ GROUPS = (
 TOOLS = {tool.key: tool for _, group in GROUPS for tool in group}
 TOOLS.update({tool.key: tool for tool in PROJECT_GROUP[1]})
 GROUP_COLUMNS = {"材质节点": 3, "素材": 2, "项目管理": 3}
-VRAY_TOOLS = {"vray_skin", "preset_vray", "import_eye", "disp", "micro", "disp_black"}
+VRAY_TOOLS = { "preset_vray", "import_eye", "disp", "micro", "disp_black"}
 ARNOLD_TOOLS = {"preset_arnold", "import_eye_arnold", "vface_browser"}
 
 

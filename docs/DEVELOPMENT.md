@@ -1,6 +1,6 @@
 # 开发与跨电脑同步
 
-稳定基线是 3.7.8（沿用 3.7.1 起的场景预设打开行为）。不要重新引入已放弃的 3.8.0 预设合并导入实验。
+稳定基线是 3.7.13（沿用 3.7.1 起的场景预设打开行为）。不要重新引入已放弃的 3.8.0 预设合并导入实验。
 
 ## 换电脑
 
@@ -11,7 +11,7 @@
 ## 修改规则
 
 - 保持 Python 3.7 语法及 Maya 2022 API 兼容性。
-- `config.py` 定义工具目录；`core.py` / `project.py` / `eyes.py` / `vface.py` / `gn.py` 维护逻辑；`ui.py` 维护主窗口，`vface_ui.py` 维护 VFace 浏览器。
+- `config.py` 定义工具目录；`core.py` / `project.py` / `eyes.py` / `vface.py` / `gn.py` / `metahuman.py` 维护逻辑；`ui.py` 维护主窗口，`vface_ui.py` 维护 VFace 浏览器。
 - 第三方插件安装包放在素材库 `Plugins/`，不进入仓库；`gn.py` 按 `GN_ImportExport_v*` 选用版本号最大的一份。
 - 工具路径一律写当前目录名；`config.LEGACY_FOLDERS` 只用于识别未迁移的旧素材库，不要反过来把旧名写进工具表。
 - 默认预览工程由 `project.default_project_root()` 决定，必须位于素材库之外；素材库只放素材，不放工程输出。

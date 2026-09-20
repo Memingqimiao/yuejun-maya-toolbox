@@ -199,6 +199,38 @@ def blend_target(delete_source=True):
         if existing else "")
 
 
+def update_growth():
+    """Transfer selected source positions through the original growth UV layout."""
+    selected = cmds.ls(selection=True, objectsOnly=True, long=True) or []
+    if len(selected) != 1:
+        raise ToolError("请选择一个作为更新来源的头部网格，名称不限。")
+    source, source_shape, source_fn = mesh(selected[0], editable=False)
+    if "map1" not in source_fn.getUVSetNames():
+        raise ToolError("来源模型缺少 map1 UV 集，无法按 UV 更新生长体。")
+    targets = []
+    for name in ("Hair_Grtuv", "Brow_Grtuv", "Lash_Grtuv", "Beard_Grtuv"):
+        node, shape, fn = named_mesh(name, editable=True)
+        if shape == source_shape:
+            raise ToolError("请选择头部来源模型，不要选择生长体。")
+        if not {"Skin", "Hair"}.issubset(set(fn.getUVSetNames())):
+            raise ToolError("{} 缺少 Skin / Hair UV 集，请使用配套生长体。".format(name))
+        deformers = cmds.ls(cmds.listHistory(node) or [], type="geometryFilter") or []
+        if deformers:
+            raise ToolError("{} 已有变形器，更新会烘焙历史；请使用未绑定的生长体副本。".format(name))
+        targets.append((node, shape))
+    from .metahuman import without_soft_selection
+    with undo_chunk("update_growth"), without_soft_selection(), preserve_selection():
+        for node, shape in targets:
+            cmds.polyUVSet(shape, currentUVSet=True, uvSet="Skin")
+            cmds.transferAttributes(source, node, transferPositions=1, transferNormals=0,
+                                    transferUVs=0, transferColors=0, sampleSpace=3,
+                                    sourceUvSpace="map1", targetUvSpace="Skin",
+                                    searchMethod=3, flipUVs=0, colorBorders=1)
+            cmds.delete(node, constructionHistory=True)
+            cmds.polyUVSet(shape, currentUVSet=True, uvSet="Hair")
+    return "已按所选模型更新 4 个生长体（可撤销）；来源模型名称和历史保持不变。"
+
+
 def run_legacy_mel(relative):
     """Keep original commands; isolate duplicate selection declarations in growth MEL."""
     if os.path.basename(relative).lower() == "skin_chuangjianshengzhangti.mel":
@@ -518,7 +550,7 @@ def copy_folder(source, destination):
 
 
 def availability(tool):
-    if tool.kind in ("mel", "import", "open", "legacy_import", "legacy_mel"):
+    if tool.kind in ("mel", "import", "open", "legacy_import", "legacy_mel", "mh_import"):
         path = config.asset_path(tool.path)
         if not os.path.isfile(path):
             return False, "缺少文件：" + path
@@ -599,6 +631,13 @@ def execute(key, **options):
     tool = config.TOOLS.get(key)
     if tool is None:
         raise ToolError("未知工具：{}".format(key))
+    if tool.kind in ("mh_import", "mh"):
+        from . import metahuman
+        if tool.kind == "mh_import":
+            return metahuman.import_model("Female" if key == "mh_female" else "Male")
+        if key == "mh_seams":
+            return metahuman.fix_seams()
+        return metahuman.toggle_textures() if key == "mh_apply" else metahuman.toggle_uv()
     if key == "import_eye_arnold":
         from . import eyes
         return eyes.import_eye()
@@ -617,7 +656,7 @@ def execute(key, **options):
     if tool.kind == "gn_manage":
         from . import gn
         return gn.status() if key == "gn_check" else gn.install()
-    actions = {"rename_target": mark_blend_source, "blend_target": blend_target,
+    actions = {"update_growth": update_growth, "rename_target": mark_blend_source, "blend_target": blend_target,
                "vray_skin": configure_vray_skin,
                "restore_xgen_guides": restore_xgen_guides,
                "clean_unknown_nodes": clean_unknown_nodes}

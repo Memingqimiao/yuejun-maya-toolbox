@@ -1,6 +1,6 @@
 # Yuejun Maya Toolbox
 
-面向人物制作的 Maya 工具箱。当前稳定版本 **3.7.8**，兼容 Maya 2022 / Python 3.7，使用 maya.cmds 与 OpenMaya 2.0。
+面向人物制作的 Maya 工具箱。当前稳定版本 **3.7.13**，兼容 Maya 2022 / Python 3.7，使用 maya.cmds 与 OpenMaya 2.0。
 
 ## 当前行为
 
@@ -18,7 +18,7 @@
 
 1. 克隆此仓库，或在 GitHub 的 Code 菜单下载 ZIP。
 2. 单独复制完整素材库（含 Scripts、Models、RenderPresets、NodePresets、Textures、Lights 等目录）。本仓库**不包含第三方模型、贴图、预设或渲染插件**。
-3. 在 Maya 2022 Script Editor 的 **Python** 页签运行 [单文件代码](dist/YuejunToolbox_3_7_8_Single.py) 的全部内容，也可保存成 Python 工具架按钮。
+3. 在 Maya 2022 Script Editor 的 **Python** 页签运行 [单文件代码](dist/YuejunToolbox_3_7_13_Single.py) 的全部内容，也可保存成 Python 工具架按钮。
 4. 展开“资源与工具设置”，选择素材库实际目录。无需使用相同盘符。默认目录为 `C:/Yuejun_ToolBox`，自定义选择会保存到 Maya 偏好。
 5. 在项目管理中创建或设置工作项目。素材库与工作项目放在不同目录。未设置项目时，预览会使用 Maya 用户目录下的 `projects/Yuejun_Default`，素材库本身保持精简。
 
@@ -59,3 +59,19 @@ runpy.run_path(r"D:/Projects/yuejun-maya-toolbox/launch_maya.py", run_name="__ma
 本仓库用于作者维护工具，尚未声明开源许可证；公开可见不代表授予第三方再分发权限。第三方素材、插件和表达式参考内容各自遵循原授权。
 
 素材库布局见 [目录说明](docs/LIBRARY.md)，接续开发见 [交接说明](docs/HANDOFF.md)。
+
+## MetaHuman
+
+“素材”下提供男女基础模型导入，以及“观察贴图 / 还原”切换按钮。使用素材库 Models/Metahuman/Model/MH_Base_Female.fbx 与 MH_Base_Male.fbx；贴图位于相邻 Texture 目录。
+选中导入的组或其中网格后应用；场景只有一个工具导入的 MetaHuman 时也可不选择。视口按 6 显示贴图。
+头、身体、双眼和牙齿使用配套颜色贴图与独立 Lambert 观察材质；其他部件保留原材质。此功能用于制作观察，并非最终皮肤渲染或自动绑定。
+还原恢复应用前的材质分配，不重置模型、UV、动画或绑定。备份随场景保存；请勿删除原材质或改变面拓扑后再还原。重复应用复用观察材质，贴图同步到当前项目。
+
+贴图应用与还原支持撤销。FBX 原生导入不支持完整撤销；不需要的导入副本请删除对应 MetaHuman 组。
+
+MetaHuman 区域第二排为“观察贴图 / 还原”和“MH切UV / 恢复UV”。Skin 分组已移除。
+切 UV 选择单个头部网格，名称不限；检查配套男女基础头部的完整面连接与边编号。首次点击使用原切 UV 数据，再次点击从备份精确恢复。UV 状态按网格保存，支持撤销、改名与保存重开。不要删除工具创建的 Yuejun_MH_UV_Backup UV 集；两次点击之间在当前 UV 上的修改会在恢复时一起还原。
+
+更新生长体：选中一个来源头部网格即可，名称不限；需要原配布局的 map1 UV。场景中保留唯一的一套 Hair_Grtuv / Brow_Grtuv / Lash_Grtuv / Beard_Grtuv 配套生长体及其 Skin、Hair UV 集。来源历史保留，生长体结果烘焙；已绑定的生长体会拒绝更新，避免破坏变形器。
+
+修复头身接缝：同时选中头部和身体两个网格，顺序与名称不限。工具匹配世界距离 0.01 cm 内唯一对应的开放边界点，平均接缝法线，支持一键撤销；不焊接或移动顶点，不修复几何空隙或材质色差。已完全焊接的网格不属于此功能范围。

@@ -5,8 +5,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "3.7.8"
-MODULES = ("config", "preview", "project", "core", "eyes", "gn", "vface", "vface_ui",
+VERSION = "3.7.13"
+MODULES = ("config", "preview", "project", "core", "eyes", "gn", "metahuman", "vface", "vface_ui",
            "notes_data", "notes", "ui")
 
 LOADER = '''def _yj_launch(sources=_yj_sources, sys=_yj_sys, types=_yj_types):

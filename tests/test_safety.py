@@ -490,6 +490,8 @@ class LegacyDataTests(unittest.TestCase):
 
     def test_zb_tool_removed_and_presets_import(self):
         self.assertNotIn("zb_groups", config.TOOLS)
+        self.assertNotIn("Skin", [title for title, _ in config.GROUPS])
+        self.assertNotIn("mh_restore", config.TOOLS)
         self.assertEqual(config.TOOLS["preset_arnold"].kind, "open")
         self.assertEqual(config.TOOLS["preset_vray"].kind, "open")
 
@@ -500,7 +502,7 @@ class LegacyDataTests(unittest.TestCase):
             mesh_fn = MagicMock(numPolygons=4)
             with patch.object(core, "require_file", return_value=str(path)), patch.object(core, "named_mesh", return_value=("|Skin", "shape", mesh_fn)), patch.object(core, "undo_chunk") as chunk:
                 with self.assertRaises(core.ToolError):
-                    core.run_skin_script(config.TOOLS["cut_uv"])
+                    core.run_skin_script(config.Tool("cut_uv", "test", "mel", "Scripts/Skin_qieUV.mel", ""))
                 chunk.assert_not_called()
 
 
@@ -589,7 +591,7 @@ class LibraryLayoutTests(unittest.TestCase):
         self.assertNotIn("VFace 素材", titles)
         assets = dict(config.GROUPS)["素材"]
         self.assertEqual([tool.key for tool in assets],
-                         ["import_eye", "import_eye_arnold", "vface_browser"])
+                         ["import_eye", "import_eye_arnold", "vface_browser", "mh_female", "mh_male", "mh_apply", "mh_uv", "mh_seams"])
 
     def test_vface_path_is_only_offered_by_the_browser(self):
         source = (Path(__file__).resolve().parents[1] / "yuejun_toolbox" / "ui.py").read_text(encoding="utf-8")
@@ -666,7 +668,7 @@ class ConfigurationAndUiTests(unittest.TestCase):
 
     def test_missing_file_has_actionable_disabled_state(self):
         with tempfile.TemporaryDirectory() as root, patch.object(config, "resource_root", return_value=root):
-            available, message = core.availability(config.TOOLS["cut_uv"])
+            available, message = core.availability(config.Tool("cut_uv", "test", "mel", "Scripts/Skin_qieUV.mel", ""))
         self.assertFalse(available)
         self.assertIn("Skin_qieUV.mel", message)
 
@@ -681,7 +683,7 @@ class ConfigurationAndUiTests(unittest.TestCase):
         events = []
         with patch.object(ui, "close", side_effect=lambda: events.append("close")), patch.object(ui, "show", side_effect=lambda: events.append("show")), patch.object(importlib, "reload", side_effect=lambda module: events.append(module.__name__)):
             yuejun_toolbox.reload_toolbox()
-        self.assertEqual(events, ["close", "yuejun_toolbox.config", "yuejun_toolbox.preview", "yuejun_toolbox.project", "yuejun_toolbox.core", "yuejun_toolbox.eyes", "yuejun_toolbox.gn", "yuejun_toolbox.vface", "yuejun_toolbox.vface_ui", "yuejun_toolbox.notes_data", "yuejun_toolbox.notes", "yuejun_toolbox.ui", "show"])
+        self.assertEqual(events, ["close", "yuejun_toolbox.config", "yuejun_toolbox.preview", "yuejun_toolbox.project", "yuejun_toolbox.core", "yuejun_toolbox.eyes", "yuejun_toolbox.gn", "yuejun_toolbox.metahuman", "yuejun_toolbox.vface", "yuejun_toolbox.vface_ui", "yuejun_toolbox.notes_data", "yuejun_toolbox.notes", "yuejun_toolbox.ui", "show"])
 
     def test_python37_grammar(self):
         if sys.version_info < (3, 8):

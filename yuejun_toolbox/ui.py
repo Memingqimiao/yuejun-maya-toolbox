@@ -26,7 +26,7 @@ class ToolboxWindow(object):
 
     def build(self):
         config.migrate_preferences()
-        window = cmds.window(WINDOW, title="Yuejun Toolbox 3.7.8",
+        window = cmds.window(WINDOW, title="Yuejun Toolbox 3.7.13",
                              widthHeight=(540, 770), sizeable=True)
         root = cmds.formLayout(parent=window)
         header = cmds.columnLayout(parent=root, adjustableColumn=True, rowSpacing=GAP)
@@ -103,6 +103,8 @@ class ToolboxWindow(object):
                 cmds.menuItem(parent=self.eye_resolution, label=value)
             cmds.optionMenu(self.eye_resolution, edit=True, value="2k")
             self.equal_columns(row, [self.eye_color, self.eye_resolution])
+        mh_tools = [tool for tool in tools if tool.key.startswith("mh_")]
+        tools = [tool for tool in tools if not tool.key.startswith("mh_")]
         columns = config.GROUP_COLUMNS.get(title, 2)
         for start in range(0, len(tools), columns):
             row = cmds.formLayout(parent=column, height=BUTTON_HEIGHT)
@@ -120,6 +122,20 @@ class ToolboxWindow(object):
             cmds.text(parent=column, align="left", wordWrap=True, height=34,
                       label="眼球设置只影响 Arnold 眼球，共用材质的眼球会一起更新。\n"
                             "VFace 素材目录在 VFace 浏览器窗口里选择。")
+        if mh_tools:
+            cmds.separator(parent=column, style="in", height=8)
+            cmds.text(parent=column, label="MetaHuman", align="left", height=20)
+            for start in range(0, len(mh_tools), 2):
+                row = cmds.formLayout(parent=column, height=BUTTON_HEIGHT)
+                controls = []
+                for tool in mh_tools[start:start + 2]:
+                    button = cmds.button(parent=row, label=tool.label, annotation=tool.help,
+                                         command=partial(self.run, tool.key))
+                    self.buttons[tool.key] = button
+                    controls.append(button)
+                self.equal_columns(row, controls)
+            cmds.text(parent=column, label="观察贴图再次点击还原；切 UV 请选头部网格，再次点击恢复。",
+                      align="left", wordWrap=True, height=26)
         if title == "目标与生长体":
             self.delete_blend_source = cmds.checkBox(
                 parent=column, label="BS切换后删除新形状模型", value=True, height=22)

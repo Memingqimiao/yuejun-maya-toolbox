@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Yuejun Toolbox 3.7.8 - Paste all into Maya's Python tab.
+# Yuejun Toolbox 3.7.13 - Paste all into Maya's Python tab.
 import sys as _yj_sys
 import types as _yj_types
 _yj_sources = {}
@@ -42,11 +42,6 @@ GROUPS = (
         Tool("gn_check", "检查 GN 安装", "gn_manage", "", "检查素材库安装包、Maya 端文件、userSetup 自启动及 ZBrush 端，显示详细报告；不修改任何文件。"),
         Tool("gn_install", "安装 GN 插件", "gn_manage", "", "把素材库 Plugins 中的 GN 安装包复制到 Maya 用户脚本目录和 ZBrush 插件目录，写入自启动并在当前会话载入菜单。"),
     )),
-    ("Skin", (
-        Tool("cut_uv", "Skin 切 UV", "mel", "Scripts/Skin_qieUV.mel", "仅适用于原配 Skin 拓扑；再次执行会再次偏移 UV。"),
-        Tool("restore_uv", "Skin 恢复 UV", "mel", "Scripts/Skin_huifuUV.mel", "原配模型的反向 UV 偏移及合并；不是通用 UV 备份恢复。"),
-        Tool("vray_skin", "V-Ray 设置 · −0.5", "core", "", "需要已加载 V-Ray；在 Skin 网格上设置细分和置换属性。"),
-    )),
     ("场景预设", (
         Tool("preset_vray", "打开 V-Ray 预设", "open", "RenderPresets/VRay/Test_Vray.mb", "直接打开 V-Ray 预设文件，替换当前场景；有未保存修改时先提示。"),
         Tool("preset_arnold", "打开 Arnold 预设", "open", "RenderPresets/Arnold/Base_Arnold.ma", "打开素材库中的 Arnold 预设；保留材质、灯光及渲染设置，有未保存修改时先提示。"),
@@ -55,6 +50,11 @@ GROUPS = (
         Tool("import_eye", "导入 V-Ray 眼球", "import", "Models/VRay_eye.mb", "将 V-Ray 眼球和可用贴图同步到当前项目后导入。"),
         Tool("import_eye_arnold", "导入 Arnold 眼球", "import", "Models/Eye_Arnold/Arnold_eye.ma", "将 Arnold 眼球及配套贴图同步到当前项目后导入；需要 Arnold 插件。"),
         Tool("vface_browser", "VFace 头部与贴图…", "ui", "", "打开 VFace 素材浏览器，在其中选择素材目录并切换配套 Arnold 预设的头部及贴图。"),
+        Tool("mh_female", "导入 MetaHuman 女", "mh_import", "Models/Metahuman/Model/MH_Base_Female.fbx", "导入女性基础模型，保留原材质与 UV。"),
+        Tool("mh_male", "导入 MetaHuman 男", "mh_import", "Models/Metahuman/Model/MH_Base_Male.fbx", "导入男性基础模型，保留原材质与 UV。"),
+        Tool("mh_apply", "观察贴图 / 还原", "mh", "", "选中 MetaHuman 组或子网格，点击应用观察贴图，再次点击还原原材质。"),
+        Tool("mh_uv", "MH切UV / 恢复UV", "mh", "", "选择符合配套 MetaHuman 拓扑的头部；首次切 UV，再次精确还原，不要求名称。"),
+        Tool("mh_seams", "修复头身接缝", "mh", "", "同时选中头部和身体，平均重合边界点法线；不移动顶点、不焊接，可撤销。"),
     )),
     ("材质节点", (
         Tool("disp", "Disp", "import", "NodePresets/Disp.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),
@@ -63,7 +63,7 @@ GROUPS = (
     )),
     ("目标与生长体", (
         Tool("import_growth", "导入生长体", "legacy_import", "Models/Skin_shengzhangti.mb", "初版命令：直接导入生长体文件。"),
-        Tool("update_growth", "更新生长体", "legacy_mel", "Scripts/Skin_chuangjianshengzhangti.Mel", "初版 MEL：使用 Skin UV 对应更新生长体，并清除脚本指定对象的历史。"),
+        Tool("update_growth", "更新生长体", "core", "", "选中头部网格按 map1 UV 更新配套生长体；来源名称不限，保留来源历史，生长体结果烘焙。"),
         Tool("rename_target", "BS先点我", "core", "", "选中新形状模型，记住它作为 BS 目标形状；不改名、不修改场景。"),
         Tool("blend_target", "BS切换", "core", "", "把目标形状的造型传到被修改模型上并烘焙历史。同时选中两个模型（先新形状后被改模型）即可一步完成；只选一个则使用上一次标记的目标形状。要求两者拓扑完全一致。"),
     )),
@@ -76,7 +76,7 @@ GROUPS = (
 TOOLS = {tool.key: tool for _, group in GROUPS for tool in group}
 TOOLS.update({tool.key: tool for tool in PROJECT_GROUP[1]})
 GROUP_COLUMNS = {"材质节点": 3, "素材": 2, "项目管理": 3}
-VRAY_TOOLS = {"vray_skin", "preset_vray", "import_eye", "disp", "micro", "disp_black"}
+VRAY_TOOLS = { "preset_vray", "import_eye", "disp", "micro", "disp_black"}
 ARNOLD_TOOLS = {"preset_arnold", "import_eye_arnold", "vface_browser"}
 
 
@@ -1094,6 +1094,38 @@ def blend_target(delete_source=True):
         if existing else "")
 
 
+def update_growth():
+    """Transfer selected source positions through the original growth UV layout."""
+    selected = cmds.ls(selection=True, objectsOnly=True, long=True) or []
+    if len(selected) != 1:
+        raise ToolError("请选择一个作为更新来源的头部网格，名称不限。")
+    source, source_shape, source_fn = mesh(selected[0], editable=False)
+    if "map1" not in source_fn.getUVSetNames():
+        raise ToolError("来源模型缺少 map1 UV 集，无法按 UV 更新生长体。")
+    targets = []
+    for name in ("Hair_Grtuv", "Brow_Grtuv", "Lash_Grtuv", "Beard_Grtuv"):
+        node, shape, fn = named_mesh(name, editable=True)
+        if shape == source_shape:
+            raise ToolError("请选择头部来源模型，不要选择生长体。")
+        if not {"Skin", "Hair"}.issubset(set(fn.getUVSetNames())):
+            raise ToolError("{} 缺少 Skin / Hair UV 集，请使用配套生长体。".format(name))
+        deformers = cmds.ls(cmds.listHistory(node) or [], type="geometryFilter") or []
+        if deformers:
+            raise ToolError("{} 已有变形器，更新会烘焙历史；请使用未绑定的生长体副本。".format(name))
+        targets.append((node, shape))
+    from .metahuman import without_soft_selection
+    with undo_chunk("update_growth"), without_soft_selection(), preserve_selection():
+        for node, shape in targets:
+            cmds.polyUVSet(shape, currentUVSet=True, uvSet="Skin")
+            cmds.transferAttributes(source, node, transferPositions=1, transferNormals=0,
+                                    transferUVs=0, transferColors=0, sampleSpace=3,
+                                    sourceUvSpace="map1", targetUvSpace="Skin",
+                                    searchMethod=3, flipUVs=0, colorBorders=1)
+            cmds.delete(node, constructionHistory=True)
+            cmds.polyUVSet(shape, currentUVSet=True, uvSet="Hair")
+    return "已按所选模型更新 4 个生长体（可撤销）；来源模型名称和历史保持不变。"
+
+
 def run_legacy_mel(relative):
     """Keep original commands; isolate duplicate selection declarations in growth MEL."""
     if os.path.basename(relative).lower() == "skin_chuangjianshengzhangti.mel":
@@ -1413,7 +1445,7 @@ def copy_folder(source, destination):
 
 
 def availability(tool):
-    if tool.kind in ("mel", "import", "open", "legacy_import", "legacy_mel"):
+    if tool.kind in ("mel", "import", "open", "legacy_import", "legacy_mel", "mh_import"):
         path = config.asset_path(tool.path)
         if not os.path.isfile(path):
             return False, "缺少文件：" + path
@@ -1494,6 +1526,13 @@ def execute(key, **options):
     tool = config.TOOLS.get(key)
     if tool is None:
         raise ToolError("未知工具：{}".format(key))
+    if tool.kind in ("mh_import", "mh"):
+        from . import metahuman
+        if tool.kind == "mh_import":
+            return metahuman.import_model("Female" if key == "mh_female" else "Male")
+        if key == "mh_seams":
+            return metahuman.fix_seams()
+        return metahuman.toggle_textures() if key == "mh_apply" else metahuman.toggle_uv()
     if key == "import_eye_arnold":
         from . import eyes
         return eyes.import_eye()
@@ -1512,7 +1551,7 @@ def execute(key, **options):
     if tool.kind == "gn_manage":
         from . import gn
         return gn.status() if key == "gn_check" else gn.install()
-    actions = {"rename_target": mark_blend_source, "blend_target": blend_target,
+    actions = {"update_growth": update_growth, "rename_target": mark_blend_source, "blend_target": blend_target,
                "vray_skin": configure_vray_skin,
                "restore_xgen_guides": restore_xgen_guides,
                "clean_unknown_nodes": clean_unknown_nodes}
@@ -1837,6 +1876,363 @@ def load():
     except RuntimeError as error:
         raise GnError("GN 脚本加载失败：{}。请重启 Maya 后再试。".format(error))
     return "GN 菜单已在当前会话载入。"
+
+'''
+
+_yj_sources['metahuman'] = r'''
+# -*- coding: utf-8 -*-
+"""MetaHuman FBX import and reversible inspection materials; no UI."""
+import math
+import time
+from collections import defaultdict
+from itertools import product
+import hashlib
+import json
+import os
+from contextlib import contextmanager
+
+from maya import cmds, mel
+from maya.api import OpenMaya as om
+from . import config, core, project, preview
+
+TAG = "yuejunMetaHuman"
+BACKUP = "yuejunMaterialBackup"
+NETWORKS = "yuejunInspectionMaterials"
+ROLE = "yuejunMetaHumanPart"
+PARTS = {"head_lod0_mesh": "Head", "body_lod0_mesh": "Body",
+         "eyeLeft_lod0_mesh": "Eyes", "eyeRight_lod0_mesh": "Eyes",
+         "teeth_lod0_mesh": "Teeth"}
+TEXTURES = {"Head": "Head_Base_Color.jpg", "Body": "Body_Base_Color.jpg",
+            "Eyes": "eyes_color_map.jpg", "Teeth": "Teeth_DiffuseTexture.jpg"}
+
+
+def _string(node, attr, value):
+    if not cmds.attributeQuery(attr, node=node, exists=True):
+        cmds.addAttr(node, longName=attr, dataType="string")
+    cmds.setAttr(node + "." + attr, value, type="string")
+
+
+def _uuid(node):
+    return cmds.ls(node, uuid=True)[0]
+
+
+def _resolve(uid):
+    nodes = cmds.ls(uid, long=True) or []
+    if len(nodes) != 1:
+        raise core.ToolError("原模型或材质已删除，不能安全还原；请撤销相关删除操作。")
+    return nodes[0]
+
+
+def target():
+    roots = set()
+    selected = cmds.ls(selection=True, long=True, objectsOnly=True) or []
+    for node in selected:
+        while node:
+            if cmds.attributeQuery(TAG, node=node, exists=True):
+                roots.add(node)
+                break
+            parents = cmds.listRelatives(node, parent=True, fullPath=True) or []
+            node = parents[0] if parents else None
+    if not selected:
+        roots = set(cmds.ls("*." + TAG, objectsOnly=True, long=True) or [])
+    if len(roots) != 1:
+        raise core.ToolError("请选择一个由工具导入的 MetaHuman 组或其中的网格。")
+    root = roots.pop()
+    core._editable(root)
+    return root
+
+
+def import_model(sex):
+    if sex not in ("Female", "Male"):
+        raise core.ToolError("未知 MetaHuman 类型。")
+    path = core.require_file("Models/Metahuman/Model/MH_Base_" + sex + ".fbx")
+    if not cmds.pluginInfo("fbxmaya", query=True, loaded=True):
+        cmds.loadPlugin("fbxmaya", quiet=True)
+    project.ensure_project()
+    session = project.SyncSession(path)
+    local = session.copy_file(path, "scene")
+    session.flush()
+    old_mode = mel.eval("FBXImportMode -q;")
+    try:
+        mel.eval('FBXImportMode -v "add";')
+        with core.undo_chunk("metahuman_import"), core.root_namespace():
+            nodes = cmds.file(local, i=True, type="FBX", namespace=":",
+                              mergeNamespacesOnClash=False, renameAll=True,
+                              returnNewNodes=True, executeScriptNodes=False) or []
+            transforms = set(cmds.ls(nodes, type="transform", long=True) or [])
+            tops = [node for node in transforms if not
+                    set(cmds.listRelatives(node, parent=True, fullPath=True) or []) & transforms]
+            if not tops:
+                raise core.ToolError("FBX 没有可导入的模型。")
+            root = cmds.group(tops, name="MetaHuman_" + sex)
+            _string(root, TAG, sex)
+            _string(root, BACKUP, "")
+            _string(root, NETWORKS, "{}")
+            for shape in cmds.listRelatives(root, allDescendents=True, type="mesh", fullPath=True) or []:
+                parent = cmds.listRelatives(shape, parent=True, fullPath=True)[0]
+                name = parent.rsplit("|", 1)[-1].rsplit(":", 1)[-1]
+                # Maya appends digits when importing a second copy into root namespace.
+                for base, role in PARTS.items():
+                    if name == base or (name.startswith(base) and name[len(base):].isdigit()):
+                        _string(shape, ROLE, role)
+                        break
+            preview.mark(session)
+            cmds.select(root, replace=True)
+    finally:
+        mel.eval('FBXImportMode -v "{}";'.format(old_mode))
+    return "已导入 MetaHuman {}。点击“观察贴图 / 还原”查看贴图，再次点击还原材质。".format(sex)
+
+
+def _meshes(root):
+    shapes = [s for s in cmds.listRelatives(root, allDescendents=True, type="mesh", fullPath=True) or []
+              if cmds.attributeQuery(ROLE, node=s, exists=True) and not cmds.getAttr(s + ".intermediateObject")]
+    for shape in shapes:
+        core._editable(shape)
+    if not shapes:
+        raise core.ToolError("没有可编辑的 MetaHuman 网格。")
+    return shapes
+
+
+def _snapshot(shape):
+    selection = om.MSelectionList()
+    selection.add(shape)
+    dag = selection.getDagPath(0)
+    fn = om.MFnMesh(dag)
+    shaders, indices = fn.getConnectedShaders(dag.instanceNumber())
+    if any(index < 0 for index in indices):
+        raise core.ToolError("模型有未分配材质的面，请先分配材质。")
+    groups = []
+    for index, shader in enumerate(shaders):
+        groups.append([_uuid(om.MFnDependencyNode(shader).name()),
+                       [face for face, assigned in enumerate(indices) if assigned == index]])
+    return {"mesh": _uuid(shape), "faces": fn.numPolygons, "groups": groups}
+
+
+def _members(shape, faces):
+    """Compact consecutive face runs to keep large assignments manageable."""
+    if not faces:
+        return []
+    result = []
+    first = last = faces[0]
+    for face in faces[1:] + [None]:
+        if face is not None and face == last + 1:
+            last = face
+            continue
+        result.append("{}.f[{}:{}]".format(shape, first, last))
+        first = last = face
+    return result
+
+
+def apply():
+    root = target()
+    shapes = _meshes(root)
+    paths = {role: core.require_file("Models/Metahuman/Texture/" + name)
+             for role, name in TEXTURES.items()}
+    session = project.SyncSession()
+    paths = {role: session.copy_file(path, "texture") for role, path in paths.items()}
+    session.flush()
+    with core.undo_chunk("metahuman_textures"), core.preserve_selection():
+        if not cmds.getAttr(root + "." + BACKUP):
+            _string(root, BACKUP, json.dumps([_snapshot(shape) for shape in shapes]))
+        networks = json.loads(cmds.getAttr(root + "." + NETWORKS))
+        for role, path in paths.items():
+            cached = networks.get(role)
+            if cached and all(cmds.ls(uid) for uid in cached):
+                sg, file_node = [_resolve(uid) for uid in cached]
+            else:
+                material = cmds.shadingNode("lambert", asShader=True, name="MH_" + role + "_Preview")
+                sg = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name=material + "SG")
+                file_node = cmds.shadingNode("file", asTexture=True, name="MH_" + role + "_Texture")
+                place = cmds.shadingNode("place2dTexture", asUtility=True, name="MH_" + role + "_UV")
+                for attr in ("coverage", "translateFrame", "rotateFrame", "mirrorU", "mirrorV", "stagger",
+                             "wrapU", "wrapV", "repeatUV", "offset", "rotateUV", "noiseUV",
+                             "vertexUvOne", "vertexUvTwo", "vertexUvThree", "vertexCameraOne"):
+                    cmds.connectAttr(place + "." + attr, file_node + "." + attr)
+                cmds.connectAttr(place + ".outUV", file_node + ".uvCoord")
+                cmds.connectAttr(place + ".outUvFilterSize", file_node + ".uvFilterSize")
+                cmds.connectAttr(file_node + ".outColor", material + ".color")
+                cmds.connectAttr(material + ".outColor", sg + ".surfaceShader")
+                networks[role] = [_uuid(sg), _uuid(file_node)]
+            cmds.setAttr(file_node + ".fileTextureName", path.replace("\\", "/"), type="string")
+            cmds.setAttr(file_node + ".colorSpace", "sRGB", type="string")
+            for shape in shapes:
+                if cmds.getAttr(shape + "." + ROLE) == role:
+                    cmds.sets(shape, edit=True, forceElement=sg)
+        _string(root, NETWORKS, json.dumps(networks))
+        preview.mark(session)
+    return "已应用头部、身体、眼睛、牙齿观察贴图；视口按 6 显示贴图。原材质已记录，可一键还原。"
+
+
+def restore():
+    root = target()
+    data = cmds.getAttr(root + "." + BACKUP)
+    if not data:
+        return "当前没有需要还原的观察贴图。"
+    assignments = []
+    for record in json.loads(data):
+        shape = _resolve(record["mesh"])
+        if not shape.startswith(root + "|"):
+            raise core.ToolError("材质备份属于其他模型；请使用工具重新导入独立副本。")
+        core._editable(shape)
+        if cmds.polyEvaluate(shape, face=True) != record["faces"]:
+            raise core.ToolError("网格已锁定或面数量发生变化，无法安全还原原材质分配。")
+        original_groups = [(uid, faces) for uid, faces in record["groups"] if faces]
+        if not original_groups:
+            raise core.ToolError("材质备份没有有效分配，未执行还原。")
+        # Replace the whole-object preview membership before restoring face overrides.
+        assignments.append((_resolve(original_groups[0][0]), [shape]))
+        for uid, faces in original_groups:
+            sg = _resolve(uid)
+            core._editable(sg)
+            members = _members(shape, faces)
+            if members:
+                assignments.append((sg, members))
+    with core.undo_chunk("metahuman_restore"), core.preserve_selection():
+        for sg, members in assignments:
+            cmds.sets(members, edit=True, forceElement=sg)
+        _string(root, BACKUP, "")
+    return "已还原应用观察贴图前的材质分配；模型、UV 和绑定保持不变。"
+
+
+UV_STATE = "yuejunMHUVState"
+HEAD_TOPOLOGY = "6c3a0ee8e854787c5294e315dc0de785a4989862775b73facac128951859832a"
+
+
+def topology_signature(fn):
+    data = [list(values) for values in fn.getVertices()]
+    data.append([list(fn.getEdgeVertices(index)) for index in range(fn.numEdges)])
+    return hashlib.sha256(json.dumps(data, separators=(",", ":")).encode("ascii")).hexdigest()
+
+
+def toggle_textures():
+    root = target()
+    return restore() if cmds.getAttr(root + "." + BACKUP) else apply()
+
+
+@contextmanager
+def without_soft_selection():
+    enabled = cmds.softSelect(query=True, softSelectEnabled=True)
+    try:
+        if enabled:
+            cmds.softSelect(softSelectEnabled=False)
+        yield
+    finally:
+        if enabled:
+            cmds.softSelect(softSelectEnabled=True)
+
+
+def toggle_uv():
+    selected = cmds.ls(selection=True, objectsOnly=True, long=True) or []
+    if len(selected) != 1:
+        raise core.ToolError("请选择一个 MetaHuman 头部网格；支持任意名称。")
+    node, shape, fn = core.mesh(selected[0], editable=True)
+    if topology_signature(fn) != HEAD_TOPOLOGY:
+        raise core.ToolError("头部拓扑或面/边编号与配套 MetaHuman 不一致，未修改 UV。")
+    data = cmds.getAttr(shape + "." + UV_STATE) if cmds.attributeQuery(UV_STATE, node=shape, exists=True) else ""
+    sets = list(fn.getUVSetNames())
+    if data:
+        state = json.loads(data)
+        if state["original"] not in sets or state["backup"] not in sets:
+            raise core.ToolError("原 UV 集或备份已被删除，无法自动还原。")
+        with core.undo_chunk("mh_restore_uv"), without_soft_selection(), core.preserve_selection():
+            cmds.polyUVSet(shape, copy=True, uvSet=state["backup"], newUVSet=state["original"])
+            cmds.polyUVSet(shape, currentUVSet=True, uvSet=state["original"])
+            cmds.polyUVSet(shape, delete=True, uvSet=state["backup"])
+            _string(shape, UV_STATE, "")
+        return "已精确还原切换前的 UV（可撤销）。"
+    if not sets:
+        raise core.ToolError("所选模型没有 UV 集。")
+    original = fn.currentUVSetName()
+    backup = "Yuejun_MH_UV_Backup"
+    while backup in sets:
+        backup += "_1"
+    path = core.require_file("Scripts/Skin_qieUV.mel")
+    with open(path, encoding="utf-8-sig") as stream:
+        plan = core.skin_plan(stream.read(), "cut_uv", node)
+    with core.undo_chunk("mh_cut_uv"), without_soft_selection(), core.preserve_selection():
+        cmds.polyUVSet(shape, copy=True, uvSet=original, newUVSet=backup)
+        cmds.polyUVSet(shape, currentUVSet=True, uvSet=original)
+        for command, args, kwargs in plan:
+            getattr(cmds, command)(*args, **kwargs)
+        _string(shape, UV_STATE, json.dumps({"original": original, "backup": backup}))
+    return "MH 切 UV 完成；再次点击同一按钮恢复切换前的 UV（可撤销）。"
+
+
+
+def boundary_vertices(fn):
+    result = set()
+    iterator = om.MItMeshEdge(fn.dagPath())
+    while not iterator.isDone():
+        if iterator.onBoundary():
+            result.update((iterator.vertexId(0), iterator.vertexId(1)))
+        iterator.next()
+    return sorted(result)
+
+
+def seam_pairs(points_a, ids_a, points_b, ids_b, tolerance):
+    # Search adjacent cells too: rounding alone misses pairs across a cell edge.
+    def cell(point):
+        return tuple(int(math.floor(value / tolerance)) for value in (point.x, point.y, point.z))
+    buckets = defaultdict(list)
+    for index in ids_a:
+        buckets[cell(points_a[index])].append(index)
+    candidates = {}
+    reverse = defaultdict(list)
+    for j in ids_b:
+        key = cell(points_b[j])
+        matches = []
+        for offset in product((-1, 0, 1), repeat=3):
+            for i in buckets.get(tuple(key[k] + offset[k] for k in range(3)), ()):
+                if points_a[i].distanceTo(points_b[j]) <= tolerance:
+                    matches.append(i)
+        if len(matches) == 1:
+            candidates[j] = matches[0]
+        for i in matches:
+            reverse[i].append(j)
+    return [(i, j) for j, i in candidates.items() if len(reverse[i]) == 1]
+
+
+def fix_seams(tolerance=0.01):
+    """Average only unambiguous coincident boundary normals, with native undo."""
+    started = time.perf_counter()
+    if not math.isfinite(tolerance) or tolerance <= 0:
+        raise core.ToolError("接缝距离容差必须大于零。")
+    selected = cmds.ls(selection=True, objectsOnly=True, long=True) or []
+    if len(selected) != 2:
+        raise core.ToolError("请同时选择头部和身体两个网格，顺序不限。")
+    meshes = [core.mesh(node, editable=True) for node in selected]
+    if meshes[0][1] == meshes[1][1]:
+        raise core.ToolError("请选择两个不同的网格。")
+    fns = [entry[2] for entry in meshes]
+    points = [fn.getPoints(om.MSpace.kWorld) for fn in fns]
+    pairs = seam_pairs(points[0], boundary_vertices(fns[0]), points[1], boundary_vertices(fns[1]), tolerance)
+    if not pairs:
+        raise core.ToolError("未找到唯一对应的重合边界点，请检查头部与身体的对齐；未修改模型。")
+    normals = [fn.getVertexNormals(False, om.MSpace.kWorld) for fn in fns]
+    # polyNormalPerVertex writes object-space normals; world normals require
+    # the inverse of the normal matrix, i.e. transpose(object-to-world).
+    matrices = [fn.dagPath().inclusiveMatrix().transpose() for fn in fns]
+    batches = defaultdict(list)
+    count = 0
+    for i, j in pairs:
+        normal = om.MVector(normals[0][i]).normal() + om.MVector(normals[1][j]).normal()
+        if normal.length() < 1e-8:
+            continue
+        normal.normalize()
+        for side, index in enumerate((i, j)):
+            local = normal * matrices[side]
+            if local.length() < 1e-8:
+                raise core.ToolError("模型变换不可逆，请检查零缩放；未修改模型。")
+            local.normalize()
+            key = tuple(round(value, 12) for value in (local.x, local.y, local.z))
+            batches[key].append("{}.vtx[{}]".format(meshes[side][1], index))
+        count += 1
+    if not count:
+        raise core.ToolError("匹配处法线方向相反，无法安全平均；请先检查面朝向。")
+    with core.undo_chunk("fix_metahuman_seams"), without_soft_selection(), core.preserve_selection():
+        for normal, vertices in batches.items():
+            cmds.polyNormalPerVertex(vertices, xyz=normal)
+    return "已修复 {} 对接缝顶点法线，耗时 {:.2f} 秒（可撤销）；不移动顶点。".format(count, time.perf_counter() - started)
 
 '''
 
@@ -2403,7 +2799,7 @@ class ToolboxWindow(object):
 
     def build(self):
         config.migrate_preferences()
-        window = cmds.window(WINDOW, title="Yuejun Toolbox 3.7.8",
+        window = cmds.window(WINDOW, title="Yuejun Toolbox 3.7.13",
                              widthHeight=(540, 770), sizeable=True)
         root = cmds.formLayout(parent=window)
         header = cmds.columnLayout(parent=root, adjustableColumn=True, rowSpacing=GAP)
@@ -2480,6 +2876,8 @@ class ToolboxWindow(object):
                 cmds.menuItem(parent=self.eye_resolution, label=value)
             cmds.optionMenu(self.eye_resolution, edit=True, value="2k")
             self.equal_columns(row, [self.eye_color, self.eye_resolution])
+        mh_tools = [tool for tool in tools if tool.key.startswith("mh_")]
+        tools = [tool for tool in tools if not tool.key.startswith("mh_")]
         columns = config.GROUP_COLUMNS.get(title, 2)
         for start in range(0, len(tools), columns):
             row = cmds.formLayout(parent=column, height=BUTTON_HEIGHT)
@@ -2497,6 +2895,20 @@ class ToolboxWindow(object):
             cmds.text(parent=column, align="left", wordWrap=True, height=34,
                       label="眼球设置只影响 Arnold 眼球，共用材质的眼球会一起更新。\n"
                             "VFace 素材目录在 VFace 浏览器窗口里选择。")
+        if mh_tools:
+            cmds.separator(parent=column, style="in", height=8)
+            cmds.text(parent=column, label="MetaHuman", align="left", height=20)
+            for start in range(0, len(mh_tools), 2):
+                row = cmds.formLayout(parent=column, height=BUTTON_HEIGHT)
+                controls = []
+                for tool in mh_tools[start:start + 2]:
+                    button = cmds.button(parent=row, label=tool.label, annotation=tool.help,
+                                         command=partial(self.run, tool.key))
+                    self.buttons[tool.key] = button
+                    controls.append(button)
+                self.equal_columns(row, controls)
+            cmds.text(parent=column, label="观察贴图再次点击还原；切 UV 请选头部网格，再次点击恢复。",
+                      align="left", wordWrap=True, height=26)
         if title == "目标与生长体":
             self.delete_blend_source = cmds.checkBox(
                 parent=column, label="BS切换后删除新形状模型", value=True, height=22)
@@ -2755,9 +3167,9 @@ def _yj_launch(sources=_yj_sources, sys=_yj_sys, types=_yj_types):
     package = types.ModuleType(package_name)
     package.__path__ = []
     package.__package__ = package_name
-    package.__version__ = "3.7.8"
+    package.__version__ = "3.7.13"
     sys.modules[package_name] = package
-    for name in ('config', 'preview', 'project', 'core', 'eyes', 'gn', 'vface', 'vface_ui', 'notes_data', 'notes', 'ui'):
+    for name in ('config', 'preview', 'project', 'core', 'eyes', 'gn', 'metahuman', 'vface', 'vface_ui', 'notes_data', 'notes', 'ui'):
         fullname = package_name + "." + name
         module = types.ModuleType(fullname)
         module.__package__ = package_name

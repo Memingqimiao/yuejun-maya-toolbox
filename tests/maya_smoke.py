@@ -101,16 +101,20 @@ def main():
             self.assertFalse(cmds.objExists("TemporaryFailedModel"))
             self.assertTrue(cmds.objExists("UserModel"))
 
-        def test_original_growth_update_uses_original_uv_script(self):
+        def test_growth_update_uses_selected_source_and_preserves_history(self):
             resource_root = os.environ.get("YUEJUN_TEST_ASSET_ROOT", "C:/Yuejun_ToolBox")
             if not os.path.isfile(os.path.join(resource_root, "Scripts/Skin_chuangjianshengzhangti.Mel")):
                 self.skipTest("Original update script unavailable")
-            cmds.polyPlane(name="Skin")
+            source = cmds.polyPlane(name="ArbitraryHead")[0]
+            cmds.polyMoveVertex(source + ".vtx[*]", translateY=2, constructionHistory=True)
             names = ("Hair_Grtuv", "Brow_Grtuv", "Lash_Grtuv", "Beard_Grtuv")
             for name in names:
                 cmds.polyPlane(name=name)
                 for uv_set in ("Skin", "Hair"):
                     cmds.polyUVSet(name, copy=True, uvSet="map1", newUVSet=uv_set)
+            cmds.select(source)
+            source_history = cmds.listHistory(source)
+            cmds.softSelect(softSelectEnabled=True)
             with patch.object(config, "resource_root", return_value=resource_root):
                 messages = []
                 callback = om.MCommandMessage.addCommandOutputCallback(lambda message, kind, *args: messages.append(message))
@@ -120,11 +124,19 @@ def main():
                 finally:
                     om.MMessage.removeCallback(callback)
                 self.assertFalse(any("$selection" in message for message in messages), messages)
-            self.assertTrue(cmds.objExists("Skin"))
+            self.assertTrue(cmds.objExists(source))
+            self.assertEqual(cmds.listHistory(source), source_history)
+            self.assertEqual(cmds.ls(selection=True), [source])
+            self.assertTrue(cmds.softSelect(query=True, softSelectEnabled=True))
             self.assertFalse(cmds.ls(type="transferAttributes"))
             for name in names:
                 self.assertTrue(cmds.objExists(name))
                 self.assertEqual(cmds.polyUVSet(name, query=True, currentUVSet=True), ["Hair"])
+                self.assertAlmostEqual(cmds.xform(name + ".vtx[0]", query=True, worldSpace=True, translation=True)[1], 2.0, places=4)
+            cmds.undo()
+            cmds.undo()
+            self.assertAlmostEqual(cmds.xform(names[0] + ".vtx[0]", query=True, worldSpace=True, translation=True)[1], 0.0, places=4)
+            cmds.softSelect(softSelectEnabled=False)
 
         def test_direct_import_and_native_repeat_have_no_prefix(self):
             with tempfile.TemporaryDirectory() as folder:
