@@ -48,6 +48,8 @@ GROUPS = (
         Tool("mh_apply", "观察贴图 / 还原", "mh", "", "选中 MetaHuman 组或子网格，点击应用观察贴图，再次点击还原原材质。"),
         Tool("mh_uv", "MH切UV / 恢复UV", "mh", "", "选择符合配套 MetaHuman 拓扑的头部；首次切 UV，再次精确还原，不要求名称。"),
         Tool("mh_seams", "修复头身接缝", "mh", "", "同时选中头部和身体，平均重合边界点法线；不移动顶点、不焊接，可撤销。"),
+        Tool("mh_reindex", "修复顶点编号", "mh_fit", "", "按原 map1 UV 验证对应与拓扑，生成正确编号的新头部，保留原模型。"),
+        Tool("mh_accessories", "生成 / 更新配件", "mh_fit", "", "选择修改后的头部，按参考男女模型适配眼球、牙齿、睫毛及辅助网格。"),
     )),
     ("材质节点", (
         Tool("disp", "Disp", "import", "NodePresets/Disp.ma", "直接导入节点到根命名空间，重名按 Maya 原生规则处理。"),

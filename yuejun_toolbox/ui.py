@@ -26,7 +26,7 @@ class ToolboxWindow(object):
 
     def build(self):
         config.migrate_preferences()
-        window = cmds.window(WINDOW, title="Yuejun Toolbox 3.7.13",
+        window = cmds.window(WINDOW, title="Yuejun Toolbox 3.7.14",
                              widthHeight=(540, 770), sizeable=True)
         root = cmds.formLayout(parent=window)
         header = cmds.columnLayout(parent=root, adjustableColumn=True, rowSpacing=GAP)
@@ -125,6 +125,9 @@ class ToolboxWindow(object):
         if mh_tools:
             cmds.separator(parent=column, style="in", height=8)
             cmds.text(parent=column, label="MetaHuman", align="left", height=20)
+            self.mh_reference = cmds.optionMenu(parent=column, label="配件 / 编号参考")
+            cmds.menuItem(parent=self.mh_reference, label="女 Female")
+            cmds.menuItem(parent=self.mh_reference, label="男 Male")
             for start in range(0, len(mh_tools), 2):
                 row = cmds.formLayout(parent=column, height=BUTTON_HEIGHT)
                 controls = []
@@ -253,6 +256,9 @@ class ToolboxWindow(object):
                 cmds.refresh()
             if key == "import_eye_arnold":
                 action = lambda _: eyes.import_eye(*self.eye_settings())
+            elif config.TOOLS[key].kind == "mh_fit":
+                sex = "Male" if cmds.optionMenu(self.mh_reference, query=True, select=True) == 2 else "Female"
+                action = partial(core.execute, sex=sex)
             elif key == "blend_target":
                 action = partial(core.execute, delete_source=self.delete_source_enabled())
             else:

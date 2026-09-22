@@ -631,6 +631,9 @@ def execute(key, **options):
     tool = config.TOOLS.get(key)
     if tool is None:
         raise ToolError("未知工具：{}".format(key))
+    if tool.kind == "mh_fit":
+        from . import mh_fit
+        return (mh_fit.repair_indices if key == "mh_reindex" else mh_fit.generate)(**options)
     if tool.kind in ("mh_import", "mh"):
         from . import metahuman
         if tool.kind == "mh_import":

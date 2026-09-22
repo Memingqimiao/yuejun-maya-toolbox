@@ -591,7 +591,7 @@ class LibraryLayoutTests(unittest.TestCase):
         self.assertNotIn("VFace 素材", titles)
         assets = dict(config.GROUPS)["素材"]
         self.assertEqual([tool.key for tool in assets],
-                         ["import_eye", "import_eye_arnold", "vface_browser", "mh_female", "mh_male", "mh_apply", "mh_uv", "mh_seams"])
+                         ["import_eye", "import_eye_arnold", "vface_browser", "mh_female", "mh_male", "mh_apply", "mh_uv", "mh_seams", "mh_reindex", "mh_accessories"])
 
     def test_vface_path_is_only_offered_by_the_browser(self):
         source = (Path(__file__).resolve().parents[1] / "yuejun_toolbox" / "ui.py").read_text(encoding="utf-8")
@@ -683,7 +683,7 @@ class ConfigurationAndUiTests(unittest.TestCase):
         events = []
         with patch.object(ui, "close", side_effect=lambda: events.append("close")), patch.object(ui, "show", side_effect=lambda: events.append("show")), patch.object(importlib, "reload", side_effect=lambda module: events.append(module.__name__)):
             yuejun_toolbox.reload_toolbox()
-        self.assertEqual(events, ["close", "yuejun_toolbox.config", "yuejun_toolbox.preview", "yuejun_toolbox.project", "yuejun_toolbox.core", "yuejun_toolbox.eyes", "yuejun_toolbox.gn", "yuejun_toolbox.metahuman", "yuejun_toolbox.vface", "yuejun_toolbox.vface_ui", "yuejun_toolbox.notes_data", "yuejun_toolbox.notes", "yuejun_toolbox.ui", "show"])
+        self.assertEqual(events, ["close", "yuejun_toolbox.config", "yuejun_toolbox.preview", "yuejun_toolbox.project", "yuejun_toolbox.core", "yuejun_toolbox.eyes", "yuejun_toolbox.gn", "yuejun_toolbox.metahuman", "yuejun_toolbox.mh_fit", "yuejun_toolbox.vface", "yuejun_toolbox.vface_ui", "yuejun_toolbox.notes_data", "yuejun_toolbox.notes", "yuejun_toolbox.ui", "show"])
 
     def test_python37_grammar(self):
         if sys.version_info < (3, 8):
